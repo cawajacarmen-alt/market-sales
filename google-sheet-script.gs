@@ -1,10 +1,11 @@
-// Bakery websites — Google Sheet connector (version 5: branch sales, deliveries, online orders and production in one Sheet, with staff logins).
+// Bakery websites — Google Sheet connector (version 6: branch sales, deliveries, online orders, production and peddler sales in one Sheet, with staff logins).
 // Paste this into Extensions > Apps Script of your Google Sheet, then Deploy > New deployment >
 // Web app, Execute as: Me, Who has access: Anyone. Copy the Web app URL into the app (Branch & items > Google Sheet).
 //
 // Tabs it keeps:  Market: Daily totals, Sales, Expenses (for you to read)
 //                 Other branches: "Mabuhay Daily totals", "Mabuhay Sales", "Mabuhay Expenses", and so on
 //                 Deliveries, Online orders, Production (one row per bread line / order)
+//                 Peddler sales (one row per peddler per day: taken, returned, sales, cash turned in)
 //                 Data (do not edit), App data (do not edit) (what the apps read back)
 //                 Staff logins: one row per person. Name, PIN, Sites (all, or e.g. market, deliveries), Manager (yes / no).
 //                 Delete a row to remove someone's access.
@@ -13,7 +14,7 @@
 // Deploy > Manage deployments > pencil icon > Version: New version > Deploy. The Web app URL stays the same.
 
 const DATA = 'Data (do not edit)';
-const VERSION = 5;
+const VERSION = 6;
 const NAMES = { market: 'Market', mabuhay: 'Mabuhay', mercedes: 'Mercedes', lugay: 'Lugay', main: 'Main Branch' };
 
 // Market keeps the original keys and tab names, so its earlier entries stay where they are.
@@ -126,7 +127,8 @@ const CHUNK = 45000; // a cell holds 50,000 characters, so long records (receipt
 const SPLITS = {
   dlv: [['^delivery/setup/days/', { drops: 'arr', ready: 'arr' }]],
   ord: [['^days/', { orders: 'map', collections: 'map' }]],
-  prd: [['^bakery/log/days/', { orders: 'map' }]]
+  prd: [['^bakery/log/days/', { orders: 'map' }]],
+  pdl: [['^pdl/days/', { peddlers: 'map' }]]
 };
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
@@ -214,12 +216,13 @@ function appPost_(app, docs) {
     } else { sh.appendRow(row); }
     const sp = wsSplitOf(SPLITS[app], p), d = wsAssemble(rec, sp);
     const m = /\/(\d{4}-\d{2}-\d{2})$/.exec(p);
-    if (m && (/^delivery\/setup\/days\//.test(p) || /^days\//.test(p) || /^bakery\/log\/days\//.test(p))) dates[m[1]] = d || {};
+    if (m && (/^delivery\/setup\/days\//.test(p) || /^days\//.test(p) || /^bakery\/log\/days\//.test(p) || /^pdl\/days\//.test(p))) dates[m[1]] = d || {};
   });
   Object.keys(dates).forEach(function (date) {
     if (app === 'dlv') dlvReadable_(date, dates[date], all);
     if (app === 'ord') ordReadable_(date, dates[date], all);
     if (app === 'prd') prdReadable_(date, dates[date], all);
+    if (app === 'pdl') pdlReadable_(date, dates[date], all);
   });
   return { ok: true, v: VERSION };
 }
@@ -262,6 +265,28 @@ function prdReadable_(date, d, all) {
       o.yield === undefined ? '' : Number(o.yield) || 0, done ? Number(o.passed) || 0 : '', done ? Number(o.damaged) || 0 : '', o.why || '', o.note || ''];
   });
   replace_(sheet_('Production', ['Date', 'Order no.', 'Bread', 'Batches', 'Baker', 'Status', 'Counted', 'Passed (released)', 'Damaged', 'Damage reason', 'Note']), date, rows);
+}
+
+function pdlReadable_(date, d, all) {
+  const st = all['pdl|pdl/setup'] ? setupOf_(all, 'pdl|pdl/setup') : {}, pn = {}, it = {};
+  (st.peddlers || []).forEach(function (p) { pn[p.id] = p.name; });
+  (st.items || []).forEach(function (i) { it[i.id] = i; });
+  const n = function (v) { v = parseFloat(v); return isFinite(v) ? v : 0; };
+  const rows = Object.keys(d.peddlers || {}).map(function (pid) {
+    const r = d.peddlers[pid], ids = {};
+    (r.loads || []).forEach(function (l) { Object.keys(l.q || {}).forEach(function (k) { ids[k] = 1; }); });
+    Object.keys(r.ret || {}).forEach(function (k) { ids[k] = 1; });
+    let tk = 0, rt = 0, sold = 0, sales = 0;
+    const bread = [];
+    Object.keys(ids).forEach(function (k) {
+      const t = (r.loads || []).reduce(function (a, l) { return a + n((l.q || {})[k]); }, 0), b = n((r.ret || {})[k]), s = Math.max(0, t - b);
+      const p = r.price && r.price[k] != null ? n(r.price[k]) : n((it[k] || {}).price);
+      tk += t; rt += b; sold += s; sales += s * p; if (t || b) bread.push(((it[k] || {}).name || k) + ' ' + s + '/' + t);
+    });
+    const comm = sales * n(r.comm) / 100, due = sales - comm, paid = r.cash === '' || r.cash == null ? '' : n(r.cash);
+    return [date, pn[pid] || pid, (r.loads || []).length, tk, rt, sold, sales, comm, due, paid, paid === '' ? 'not settled' : paid - due, bread.join(', '), r.by || '', r.note || ''];
+  });
+  replace_(sheet_('Peddler sales', ['Date', 'Peddler', 'Loads', 'Taken', 'Returned', 'Sold', 'Sales', 'Commission', 'To turn in', 'Turned in', 'Short / over', 'Bread (sold/taken)', 'Recorded by', 'Note']), date, rows);
 }
 
 // ---------- Staff logins ----------

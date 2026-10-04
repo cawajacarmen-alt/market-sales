@@ -1,0 +1,718 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><script>window.WS_SITE="peddlers";
+/* Login for the bakery websites. Runs before the app script.
+   Logins live in the owner's Google Sheet, tab "Staff logins" (Name, PIN, Sites, Manager). The Sheet script checks them.
+   One login per phone covers every site the person may open; it ends at midnight or on Log out.
+   Sets window.WS_USER = {name, manager} for the app. Needs WS_SITE (this site's key) defined first. */
+(function () {
+  var SITE = window.WS_SITE, SK = 'bakery.session', UK = 'bakery.users', SH = 'bakery.sheet';
+  var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  var set = function (k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
+  var json = function (k, d) { try { return JSON.parse(get(k)) || d; } catch (e) { return d; } };
+  var today = function () { return new Date().toLocaleDateString('en-CA'); };
+  var allowed = function (sites) { var s = String(sites || '').toLowerCase(); return !s.trim() || /\ball\b/.test(s) || s.split(/[\s,;]+/).indexOf(SITE) >= 0; };
+  window.WS_SHEET = function () { return get(SH) || ''; };
+  window.WS_SET_SHEET = function (u) { set(SH, u || null); };
+  window.WS_LOGOUT = function () { set(SK, null); location.reload(); };
+  if (!get(SH)) try { // a phone already connected before logins existed: reuse its link
+    for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (!/\.sheet$/.test(k)) continue;
+      var v = String(localStorage.getItem(k) || '').replace(/^"|"$/g, ''); if (/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { set(SH, v); break; } }
+  } catch (e) {}
+  var ses = json(SK, null);
+  if (ses && ses.day === today() && allowed(ses.sites)) { window.WS_USER = { name: ses.name, manager: !!ses.manager }; try { localStorage.setItem('breadorders.taker', JSON.stringify(ses.name)); } catch (e) {} }
+  else if (ses && ses.open && ses.day === today()) { window.WS_USER = null; } // the Sheet script has no logins yet: open as before
+  function hash(s) { // small non-reversible check for logging in again without internet on this phone
+    var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36);
+  }
+  function start(name, row) {
+    set(SK, JSON.stringify({ name: row.name || name, manager: !!row.manager, sites: row.sites || '', day: today() }));
+    location.reload();
+  }
+  function screen() {
+    var css = '#wsgate{position:fixed;inset:0;z-index:100;background:#f4f5f1;display:grid;place-items:center;padding:16px;font:15px system-ui,sans-serif;color:#1a1a1a;overflow:auto}' +
+      '#wsgate form{background:#fff;border:1px solid #d6d9d2;border-radius:14px;padding:22px;max-width:360px;width:100%;display:grid;gap:12px}' +
+      '#wsgate h1{margin:0;font-size:22px}#wsgate p{margin:0;font-size:13px;color:#555}#wsgate label{display:grid;gap:4px;font-size:13px;font-weight:600;color:#444}' +
+      '#wsgate input{font:inherit;padding:10px;border:1px solid #bbb;border-radius:8px;color:#1a1a1a;background:#fff;min-width:0}' +
+      '#wsgate button{font:600 15px system-ui,sans-serif;padding:11px;border-radius:8px;border:0;background:#2f6b3a;color:#fff;cursor:pointer}' +
+      '#wsgate .err{color:#b3342b;font-weight:600;font-size:13px;min-height:1em}#wsgate a{color:#2f6b3a;font-size:13px}';
+    var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+    var g = document.createElement('div'); g.id = 'wsgate';
+    var need = !window.WS_SHEET();
+    g.innerHTML = '<form autocomplete="off"><h1>' + (document.title || 'Log in') + '</h1>' +
+      '<p>Log in with your name and PIN. Ask the owner if you don\'t have one.</p>' +
+      '<label>Your name<input id="gName" autocomplete="username" required></label>' +
+      '<label>PIN<input id="gPin" type="password" inputmode="numeric" autocomplete="current-password" required></label>' +
+      '<div id="gSetup"' + (need ? '' : ' hidden') + '><label>Google Sheet link (owner sets this once per phone)<input id="gUrl" placeholder="https://script.google.com/macros/s/…/exec"></label></div>' +
+      '<div class="err" id="gErr"></div><button type="submit">Log in</button>' +
+      (need ? '' : '<a href="#" id="gShow">Change the Google Sheet link</a>') + '</form>';
+    document.body.appendChild(g);
+    var q = function (s) { return g.querySelector(s); };
+    if (q('#gShow')) q('#gShow').onclick = function (e) { e.preventDefault(); q('#gSetup').hidden = false; q('#gUrl').value = window.WS_SHEET(); };
+    q('#gName').value = json(UK, {}).last || '';
+    (q('#gName').value ? q('#gPin') : q('#gName')).focus();
+    q('form').onsubmit = function (e) {
+      e.preventDefault();
+      var name = q('#gName').value.trim(), pin = q('#gPin').value.trim(), url = (q('#gUrl').value || '').trim() || window.WS_SHEET(), err = q('#gErr');
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(url)) { err.textContent = 'Paste the Google Sheet link first (it ends with /exec).'; q('#gSetup').hidden = false; return; }
+      var cache = json(UK, {}), key = name.toLowerCase();
+      var offline = function () {
+        var c = cache[key];
+        if (c && c.h === hash(key + '|' + pin) && allowed(c.sites)) { start(name, c); return; }
+        err.textContent = 'No internet. Connect once to log in on this phone.';
+      };
+      if (!navigator.onLine) { offline(); return; }
+      err.textContent = 'Checking…';
+      fetch(url + '?action=login&site=' + encodeURIComponent(SITE) + '&name=' + encodeURIComponent(name) + '&pin=' + encodeURIComponent(pin) + '&t=' + Date.now())
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          window.WS_SET_SHEET(url);
+          if (!(j.v >= 5)) { set(SK, JSON.stringify({ open: 1, day: today() })); location.reload(); return; } // old script: no logins yet
+          if (j.setup) { err.textContent = 'No logins yet. In your Google Sheet open the "Staff logins" tab and add yourself (Name, PIN, Sites: all, Manager: yes).'; return; }
+          if (!j.ok) { err.textContent = j.locked ? 'Too many wrong tries. Wait 10 minutes.' : j.site ? 'You don\'t have access to this site.' : 'Wrong name or PIN.'; return; }
+          cache[key] = { name: j.name, manager: !!j.manager, sites: j.sites || '', h: hash(key + '|' + pin) }; cache.last = j.name; set(UK, JSON.stringify(cache));
+          start(name, j);
+        })
+        .catch(offline);
+    };
+  }
+  function bar() {
+    if (!window.WS_USER) return;
+    var b = document.createElement('div');
+    b.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:40;background:#1a1a1a;color:#fff;border-radius:99px;padding:6px 6px 6px 12px;font:600 13px system-ui,sans-serif;display:flex;gap:8px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    b.innerHTML = '<span></span><button style="font:600 12px system-ui,sans-serif;border:0;border-radius:99px;padding:5px 10px;background:#fff;color:#1a1a1a;cursor:pointer">Log out</button>';
+    b.firstChild.textContent = window.WS_USER.name + (window.WS_USER.manager ? ' · manager' : '');
+    b.lastChild.onclick = window.WS_LOGOUT; document.body.appendChild(b);
+  }
+  var locked = window.WS_USER === undefined;
+  window.WS_LOCKED = locked;
+  var go = function () { if (locked) screen(); else bar(); };
+  if (document.body) go(); else document.addEventListener('DOMContentLoaded', go);
+})();
+</script><title>Peddler Sales</title><meta name="theme-color" content="#9a3d1f"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"></head><body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap">
+<script src="../lib/xlsx.full.min.js"></script>
+<style>
+/* Layout: one column route sheet. Tabs (Today / Report / Peddlers & bread), day tiles, then one card per peddler: loads out, returns, cash turned in. */
+:root{
+  --bg:#f6f3ef; --surface:#ffffff; --line:#e2d9cf; --ink:#22170f; --muted:#6e6158;
+  --accent:#9a3d1f; --accent-ink:#ffffff; --accent-soft:#f6e2d8;
+  --good:#2c7a55; --good-soft:#d9eee3; --bad:#b8352b; --bad-soft:#f6dedb; --out:#7a5a12; --out-soft:#f5ebcf;
+  --display:"Archivo","Segoe UI",system-ui,sans-serif;
+  --body:"Public Sans","Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#17120e; --surface:#211a15; --line:#3a2f27; --ink:#f0e8e1; --muted:#a8998e;
+  --accent:#e58a64; --accent-ink:#1d0d06; --accent-soft:#41241a;
+  --good:#6cc69a; --good-soft:#1b3a2b; --bad:#ee7d70; --bad-soft:#43231f; --out:#e3c06a; --out-soft:#3a3016; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#17120e; --surface:#211a15; --line:#3a2f27; --ink:#f0e8e1; --muted:#a8998e;
+  --accent:#e58a64; --accent-ink:#1d0d06; --accent-soft:#41241a;
+  --good:#6cc69a; --good-soft:#1b3a2b; --bad:#ee7d70; --bad-soft:#43231f; --out:#e3c06a; --out-soft:#3a3016; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:900px;margin:0 auto;padding-inline:16px;padding-block:20px 60px;display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--display);font-weight:800;font-size:1.9rem;line-height:1.1;margin:0;letter-spacing:-.01em}
+h1 small{display:block;font-family:var(--body);font-size:.78rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px}
+h2{font-family:var(--display);font-size:1.15rem;margin:0;font-weight:700}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;font-weight:600}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.ghost{background:transparent;border-color:transparent}
+button.danger{color:var(--bad);border-color:var(--bad)}
+input,select{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+input.n{text-align:right;font-variant-numeric:tabular-nums;padding:7px 8px}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:600;min-width:0}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:var(--muted);white-space:nowrap}
+.tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.daybar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.daybar input{width:auto}
+.daybar .d{font-family:var(--display);font-weight:700;font-size:1.05rem}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+@media (max-width:560px){.tiles{grid-template-columns:repeat(2,1fr)}}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.tile small{display:block;color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.tile b{font-family:var(--display);font-size:1.4rem;font-variant-numeric:tabular-nums}
+.tile.bad b{color:var(--bad)}
+.who{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{border-radius:20px;padding:6px 12px;font-size:14px}
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.card .hd{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.card .nm{font-family:var(--display);font-weight:800;font-size:1.25rem}
+.pill{display:inline-block;font-size:12px;font-weight:700;border-radius:20px;padding:2px 9px;white-space:nowrap}
+.p-out{background:var(--out-soft);color:var(--out)} .p-ok{background:var(--good-soft);color:var(--good)} .p-bad{background:var(--bad-soft);color:var(--bad)}
+.tbl{overflow-x:auto;margin-inline:-4px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:5px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td input.n{width:3.6em}
+@media (max-width:420px){td input.n{width:3.1em}th,td{padding:5px 2px}}
+tfoot td{font-weight:700;border-bottom:0}
+.sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media (max-width:560px){.sum{grid-template-columns:repeat(2,1fr)}}
+.sum div{background:var(--bg);border-radius:8px;padding:8px 10px}
+.sum small{display:block;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+.sum b{font-variant-numeric:tabular-nums;font-size:1.05rem}
+.cash{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px;align-items:end}
+@media (max-width:560px){.cash{grid-template-columns:1fr 1fr}.cash .wide{grid-column:1/-1}}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted);font-size:13px}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:12px;padding:24px 18px;text-align:center;color:var(--muted)}
+.empty b{color:var(--ink);display:block;font-family:var(--display);font-size:1.05rem;margin-bottom:4px}
+.sec{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.set{display:grid;grid-template-columns:1fr 7em auto;gap:8px;align-items:center}
+.set.gone input{opacity:.55}
+.err{color:var(--bad);font-size:13px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:50;font-size:14px}
+.owe{color:var(--bad);font-weight:700} .ahead{color:var(--good);font-weight:700}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><small>Bakery</small>Peddler Sales</h1>
+    <div class="muted" id="saved"></div>
+  </header>
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-tab="day">Daily sheet</button>
+    <button class="tab" data-tab="rep" data-mgr hidden>Report</button>
+    <button class="tab" data-tab="set" data-mgr hidden>Peddlers &amp; bread</button>
+  </div>
+  <section id="vDay" style="display:flex;flex-direction:column;gap:14px">
+    <div class="daybar"><span class="d" id="dayName"></span><input type="date" id="dayPick" data-mgr hidden aria-label="Pick a day"></div>
+    <div class="tiles" id="tiles"></div>
+    <div><div class="muted" style="margin-bottom:6px">Tap a peddler to start their sheet for the day</div><div class="who" id="who"></div></div>
+    <div id="cards" style="display:flex;flex-direction:column;gap:12px"></div>
+  </section>
+  <section id="vRep" hidden style="display:flex;flex-direction:column;gap:14px"></section>
+  <section id="vSet" hidden style="display:flex;flex-direction:column;gap:14px"></section>
+</div>
+
+<script>window.WS_CFG={"app": "pdl", "name": "Peddler Sales", "split": [["^pdl/days/", {"peddlers": "map"}]], "seed": {"pdl/setup": {"comm": 0, "peddlers": [], "items": [{"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 5}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}, {"id": "itmurgnpei489", "name": "Malunggay Pandesal", "price": 0}, {"id": "itmuscdyn74nm", "name": "Buko Pie", "price": 180}]}}, "minV": 6};
+// Shared by the website pages and the Google Sheet script: one saved record per document.
+// A record keeps each piece of a document with the time it last changed, so two phones that
+// change different orders or receipts on the same day both keep their change.
+// rec = {u:{<unit>:{t:<ms>, v:<value>} | {t:<ms>, del:1}}}
+// Unit keys: "f" = whole field f; "f.m.<key>" = one entry of map field f; "f.a.<id>" = one item (by id) of array field f.
+function wsSplitOf(split, path) {
+  for (var i = 0; i < split.length; i++) if (new RegExp(split[i][0]).test(path)) return split[i][1];
+  return {};
+}
+function wsUnits(doc, sp) {
+  var u = {};
+  Object.keys(doc || {}).forEach(function (k) {
+    var v = doc[k];
+    if (sp[k] === 'map' && v && typeof v === 'object' && !Array.isArray(v)) Object.keys(v).forEach(function (s) { u[k + '.m.' + s] = v[s]; });
+    else if (sp[k] === 'arr' && Array.isArray(v)) v.forEach(function (x) { if (x && x.id != null) u[k + '.a.' + x.id] = x; });
+    else u[k] = v;
+  });
+  return u;
+}
+function wsAssemble(rec, sp) {
+  var d = {}, any = false;
+  Object.keys(sp).forEach(function (k) { d[k] = sp[k] === 'arr' ? [] : {}; });
+  Object.keys((rec && rec.u) || {}).forEach(function (key) {
+    var x = rec.u[key]; if (x.del) return; any = true;
+    var m = /^(.*?)\.(m|a)\.(.*)$/.exec(key);
+    if (m && sp[m[1]] === (m[2] === 'm' ? 'map' : 'arr')) { if (m[2] === 'm') d[m[1]][m[3]] = x.v; else d[m[1]].push(x.v); }
+    else d[key] = x.v;
+  });
+  return any ? d : null;
+}
+function wsMerge(a, b) {
+  var out = { u: {} }, au = (a && a.u) || {}, bu = (b && b.u) || {};
+  Object.keys(au).concat(Object.keys(bu)).forEach(function (k) {
+    var x = au[k], y = bu[k];
+    out.u[k] = !x ? y : !y ? x : (y.t > x.t || (y.t === x.t && JSON.stringify(y) > JSON.stringify(x))) ? y : x;
+  });
+  return out;
+}
+// New record after a page writes `doc` (null = deleted) over `rec`.
+function wsStamp(rec, doc, sp, now) {
+  var old = (rec && rec.u) || {}, nu = doc ? wsUnits(doc, sp) : {}, out = { u: {} };
+  Object.keys(old).forEach(function (k) { out.u[k] = old[k]; });
+  Object.keys(nu).forEach(function (k) {
+    var o = old[k];
+    if (!o || o.del || JSON.stringify(o.v) !== JSON.stringify(nu[k])) out.u[k] = { t: Math.max(now, o ? o.t + 1 : 0), v: nu[k] };
+  });
+  Object.keys(old).forEach(function (k) { if (!old[k].del && !(k in nu)) out.u[k] = { t: Math.max(now, old[k].t + 1), del: 1 }; });
+  return out;
+}
+
+
+/* Website copy: stands in for the Claude account features the app was written for.
+   - db: documents saved in this browser, and shared through the owner's Google Sheet when connected
+   - user: manager (owner) after unlocking with the PIN, staff otherwise
+   - downloads: a normal browser download
+   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script.
+   Optional: minV (Sheet script version needed), feeds:{<other app>:{prefix:[...], split:[...]}} and local (regex):
+   documents read from other websites through the Sheet, turned into this page's own read-only documents
+   by window.WS_DERIVE(feeds, ownDoc) -> {path: doc}. Those documents stay on this phone. */
+(function () {
+  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); }, MINV = C.minV || 3;
+  var LOCAL = C.local ? new RegExp(C.local) : null, isLocal = function (p) { return !!(LOCAL && LOCAL.test(p)); };
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  var clone = function (x) { return x == null ? x : JSON.parse(JSON.stringify(x)); };
+  var sp = function (p) { return wsSplitOf(C.split, p); };
+
+  /* ---------- local store ---------- */
+  var recs = lsGet(LS + '.docs', {}), pend = lsGet(LS + '.pending', {}), sheet = lsGet(LS + '.sheet', '') || (window.WS_SHEET ? window.WS_SHEET() : ''), since = lsGet(LS + '.since', 0);
+  Object.keys(C.seed || {}).forEach(function (p) { if (!recs[p]) recs[p] = wsStamp(null, C.seed[p], sp(p), 1); });
+  var cache = {};
+  function docOf(p) { if (!(p in cache)) cache[p] = wsAssemble(recs[p], sp(p)); return cache[p]; }
+  function saveAll() { if (!lsSet(LS + '.docs', recs)) status('Could not save. This phone may be out of space.'); lsSet(LS + '.pending', pend); }
+  saveAll();
+  var parent = function (p) { return p.slice(0, p.lastIndexOf('/')); };
+
+  /* ---------- listeners ---------- */
+  var subs = [];
+  function snapDoc(p) { var d = docOf(p); return { id: p.slice(p.lastIndexOf('/') + 1), exists: !!d, data: function () { return clone(d) || undefined; } }; }
+  function runQuery(q) {
+    var out = [];
+    Object.keys(recs).forEach(function (p) {
+      if (parent(p) !== q.coll) return; var d = docOf(p); if (!d) return;
+      for (var i = 0; i < q.where.length; i++) { var w = q.where[i], a = d[w[0]], b = w[2], op = w[1];
+        if (!(op === '==' ? a === b : op === '>=' ? a >= b : op === '<=' ? a <= b : op === '<' ? a < b : op === '>' ? a > b : op === '!=' ? a !== b : false)) return; }
+      out.push(snapDoc(p));
+    });
+    out.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+    return { docs: out, size: out.length, empty: !out.length, forEach: function (f) { out.forEach(f); } };
+  }
+  function changed(paths) {
+    paths.forEach(function (p) { delete cache[p]; });
+    setTimeout(function () {
+      subs.slice().forEach(function (s) {
+        if (s.doc ? paths.indexOf(s.doc) >= 0 : paths.some(function (p) { return parent(p) === s.q.coll; }))
+          try { s.fn(s.doc ? snapDoc(s.doc) : runQuery(s.q)); } catch (e) { console.error(e); }
+      });
+    }, 0);
+  }
+  function write(p, doc) {
+    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush(); clearTimeout(write.d); write.d = setTimeout(derive, 800);
+    return Promise.resolve();
+  }
+  function merge(a, b) {
+    for (var k in b) { var v = b[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { if (!a[k] || typeof a[k] !== 'object' || Array.isArray(a[k])) a[k] = {}; merge(a[k], v); }
+      else if (v === undefined) delete a[k]; else a[k] = v; }
+    return a;
+  }
+  function DocRef(p) {
+    return {
+      id: p.slice(p.lastIndexOf('/') + 1), path: p,
+      get: function () { return Promise.resolve(snapDoc(p)); },
+      set: function (d, o) { return write(p, o && o.merge ? merge(clone(docOf(p)) || {}, clone(d)) : clone(d)); },
+      update: function (d) { if (!docOf(p)) return Promise.reject({ code: 'not_found', message: 'Not found' }); return write(p, merge(clone(docOf(p)), clone(d))); },
+      delete: function () { return write(p, null); },
+      onSnapshot: function (fn) { var s = { doc: p, fn: fn }; subs.push(s); setTimeout(function () { fn(snapDoc(p)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; },
+      collection: function (c) { return Coll(p + '/' + c); }
+    };
+  }
+  function Coll(c, where) {
+    var q = { coll: c, where: where || [] };
+    return {
+      doc: function (id) { return DocRef(c + '/' + (id || 'd' + now().toString(36) + Math.random().toString(36).slice(2, 6))); },
+      add: function (d) { var r = DocRef(c + '/d' + now().toString(36) + Math.random().toString(36).slice(2, 6)); return r.set(d).then(function () { return r; }); },
+      where: function (f, op, v) { return Coll(c, q.where.concat([[f, op, v]])); },
+      orderBy: function () { return Coll(c, q.where); }, limit: function () { return Coll(c, q.where); },
+      get: function () { return Promise.resolve(runQuery(q)); },
+      onSnapshot: function (fn) { var s = { q: q, fn: fn }; subs.push(s); setTimeout(function () { fn(runQuery(q)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; }
+    };
+  }
+  var DB = { doc: DocRef, collection: function (c) { return Coll(c); } };
+
+
+  /* ---------- documents from the other websites ---------- */
+  var feeds = C.feeds || {}, fc = {};
+  Object.keys(feeds).forEach(function (a) { fc[a] = lsGet(LS + '.feed.' + a, { recs: {}, since: 0 }); });
+  function feedPull() {
+    var apps = Object.keys(feeds); if (!sheet || !navigator.onLine || !apps.length) return Promise.resolve();
+    var old = (function () { var d = new Date(); d.setDate(d.getDate() - 45); return d.toLocaleDateString('en-CA'); })();
+    return Promise.all(apps.map(function (a) {
+      return fetch(sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + 'action=docs&app=' + a + '&since=' + fc[a].since + '&t=' + now())
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) return;
+          Object.keys(j.docs || {}).forEach(function (p) { if (feeds[a].prefix.some(function (x) { return p.indexOf(x) === 0; })) fc[a].recs[p] = j.docs[p]; });
+          Object.keys(fc[a].recs).forEach(function (p) { var m = /(\d{4}-\d{2}-\d{2})$/.exec(p); if (m && m[1] < old) delete fc[a].recs[p]; });
+          fc[a].since = j.t || fc[a].since; lsSet(LS + '.feed.' + a, fc[a]);
+        }).catch(function () {});
+    })).then(derive);
+  }
+  function derive() {
+    if (!window.WS_DERIVE) return;
+    var F = {}, out;
+    Object.keys(feeds).forEach(function (a) { F[a] = {}; Object.keys(fc[a].recs).forEach(function (p) { var d = wsAssemble(fc[a].recs[p], wsSplitOf(feeds[a].split || [], p)); if (d) F[a][p] = d; }); });
+    try { out = window.WS_DERIVE(F, function (p) { return clone(docOf(p)); }) || {}; } catch (e) { console.error(e); return; }
+    var ch = [];
+    Object.keys(recs).forEach(function (p) { if (isLocal(p) && !(p in out) && docOf(p)) { recs[p] = wsStamp(recs[p], null, {}, now()); ch.push(p); } });
+    Object.keys(out).forEach(function (p) { if (JSON.stringify(docOf(p)) !== JSON.stringify(out[p])) { recs[p] = wsStamp(recs[p], out[p], {}, now()); ch.push(p); } });
+    if (ch.length) { saveAll(); changed(ch); }
+  }
+
+  /* ---------- manager PIN ---------- */
+  var PIN = LS + '.pin', UNL = LS + '.unlocked';
+  var pin = function () { return lsGet(PIN, ''); };
+  var unlocked = function () { try { return sessionStorage.getItem(UNL) === '1'; } catch (e) { return false; } };
+  var LOGIN = window.WS_USER || null;
+  var isMgr = function () { return LOGIN ? !!LOGIN.manager : !pin() || unlocked(); };
+  var USER = { isOwner: function () { return Promise.resolve(isMgr()); }, canEdit: function () { return Promise.resolve(isMgr()); },
+    id: function () { return Promise.resolve(isMgr() ? 'owner' : 'staff'); }, name: function () { return Promise.resolve(LOGIN ? LOGIN.name : isMgr() ? 'Manager' : 'Staff'); } };
+
+  /* ---------- downloads ---------- */
+  var DL = { save: function (o) {
+    var a = document.createElement('a'), u = URL.createObjectURL(o.data instanceof Blob ? o.data : new Blob([o.data]));
+    a.href = u; a.download = o.filename || 'file'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+    return Promise.resolve(); } };
+
+  window.claude = { use: function (n) { return Promise.resolve(n === 'db' ? DB : n === 'user' ? USER : n === 'downloads' ? DL : null); } };
+
+  /* ---------- Google Sheet sharing ---------- */
+  var pushT = null, busy = false, lastOk = 0, err = '';
+  function queuePush() { if (!sheet) return; clearTimeout(pushT); pushT = setTimeout(push, 1200); }
+  function api(params) { return sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + params + '&app=' + C.app + '&t=' + now(); }
+  function push() {
+    Object.keys(pend).forEach(function (p) { if (isLocal(p)) delete pend[p]; });
+    var ps = Object.keys(pend); if (!sheet || busy || !ps.length) return;
+    if (!navigator.onLine) { status(''); return; }
+    busy = true; var body = { action: 'docs', app: C.app, docs: {} }; ps.forEach(function (p) { body.docs[p] = recs[p]; });
+    fetch(sheet, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.ok || !(j.v >= MINV)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
+      .catch(function (e) { err = e && e.message === 'old' ? 'the Google Sheet script needs updating' : 'could not send to Google Sheet yet'; setTimeout(push, 30000); })
+      .then(function () { busy = false; status(''); if (Object.keys(pend).length && !err) setTimeout(push, 500); });
+  }
+  function pull() {
+    if (!sheet || !navigator.onLine) return Promise.resolve();
+    return fetch(api('action=docs&since=' + since)).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw 0; if (!(j.v >= MINV)) { err = 'the Google Sheet script needs updating'; status(''); return; }
+      var ch = [];
+      Object.keys(j.docs || {}).forEach(function (p) { var m = wsMerge(recs[p], j.docs[p]);
+        if (JSON.stringify(m) !== JSON.stringify(recs[p])) { recs[p] = m; ch.push(p); if (JSON.stringify(m) !== JSON.stringify(j.docs[p])) pend[p] = 1; } });
+      since = j.t || since; lsSet(LS + '.since', since); saveAll(); lastOk = now(); err = '';
+      if (ch.length) changed(ch);
+      if (Object.keys(pend).length) push();
+      status('');
+      return feedPull();
+    }).catch(function () { err = 'could not reach Google Sheet'; status(''); });
+  }
+  // Tapping anything fetches the latest first (at most every 2 s), so a new order or receipt number counts the other phones' entries.
+  var lastTap = 0;
+  var tap = function () { if (now() - lastTap > 2000) { lastTap = now(); pull(); } };
+  document.addEventListener('pointerdown', tap, true); document.addEventListener('keydown', tap, true);
+  window.addEventListener('online', function () { push(); pull(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') pull(); });
+  setInterval(function () { if (document.visibilityState === 'visible') pull(); }, 30000);
+
+  /* ---------- bar + panel ---------- */
+  var css = '#wsbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:6px 16px;font:500 13px system-ui,sans-serif;background:#1f2a24;color:#e8efe9}' +
+    '#wsbar button{font:600 13px system-ui,sans-serif;border:1px solid #6d8b77;background:transparent;color:#e8efe9;border-radius:6px;padding:4px 10px;cursor:pointer}' +
+    '#wspanel{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px}' +
+    '#wspanel>div{background:#fff;color:#1a1a1a;border-radius:12px;padding:16px;max-width:460px;width:100%;display:grid;gap:10px;font:15px system-ui,sans-serif;max-height:100%;overflow:auto}' +
+    '#wspanel h3{margin:4px 0 0;font-size:16px}#wspanel p{margin:0;font-size:13px;color:#555}#wspanel .r{display:flex;gap:8px;flex-wrap:wrap}' +
+    '#wspanel input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid #bbb;border-radius:8px;color:#1a1a1a;background:#fff}' +
+    '#wspanel button{font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:8px;border:1px solid #bbb;background:#fff;color:#1a1a1a;cursor:pointer}#wspanel button.p{background:#2f6b3a;border-color:#2f6b3a;color:#fff}';
+  function el(h) { var d = document.createElement('div'); d.innerHTML = h; return d.firstChild; }
+  var bar;
+  function status() {
+    if (!bar) return; var s = bar.querySelector('#wsst');
+    var n = Object.keys(pend).length;
+    s.textContent = !sheet ? 'Saved on this phone only' : err ? 'Saved on this phone · ' + err : n ? (navigator.onLine ? 'Saved on this phone · sending to Google Sheet…' : 'Saved on this phone · will send when online') : 'Shared with Google Sheet' + (lastOk ? ' ' + new Date(lastOk).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  }
+  function toast(t) { var x = document.getElementById('wstoast'); if (!x) { x = el('<div id="wstoast" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:9px 16px;border-radius:8px;font:14px system-ui;z-index:60"></div>'); document.body.appendChild(x); } x.textContent = t; x.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(function () { x.hidden = true; }, 2600); }
+  function panel() {
+    var mgr = isMgr(), p = el('<div id="wspanel"><div>' +
+      (mgr || LOGIN ? '' : '<h3>Manager PIN</h3><div class="r"><input id="wspin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN"><button class="p" id="wsgo">Unlock</button></div>') +
+      (mgr ? (LOGIN ? '' : '<h3>Manager PIN</h3><p>' + (pin() ? 'A PIN is set. Staff see only today until someone unlocks with it. Type a new one to change it.' : 'No PIN yet, so anyone with this page can see past days and reports. Set a PIN only you know.') + '</p><div class="r"><input id="wsnew" type="password" inputmode="numeric" autocomplete="off" placeholder="New PIN"><button class="p" id="wsset">Save PIN</button></div>') +
+        '<h3>Google Sheet</h3><p>' + (sheet ? 'Connected. Entries are shared with your Google Sheet and every phone or computer connected to it.' : 'Not connected. Entries stay only on this phone. Paste the Web app URL from your Google Sheet to share them.') + '</p>' +
+        '<div class="r"><input id="wsurl" placeholder="https://script.google.com/macros/s/…/exec" value="' + (sheet || '').replace(/"/g, '') + '"><button class="p" id="wscon">Connect</button></div>' + (sheet ? '<div class="r"><button id="wsoff">Disconnect this phone</button></div>' : '') : '') +
+      '<div class="r" style="justify-content:flex-end">' + (mgr && pin() && !LOGIN ? '<button id="wslock">Lock (staff view)</button>' : '') + '<button id="wsx">Close</button></div></div></div>');
+    document.body.appendChild(p);
+    var q = function (s) { return p.querySelector(s); }, close = function () { p.remove(); };
+    q('#wsx').onclick = close; p.onclick = function (e) { if (e.target === p) close(); };
+    if (q('#wsgo')) { var go = function () { if (q('#wspin').value === pin()) { try { sessionStorage.setItem(UNL, '1'); } catch (e) {} location.reload(); } else toast('Wrong PIN'); };
+      q('#wsgo').onclick = go; q('#wspin').onkeydown = function (e) { if (e.key === 'Enter') go(); }; q('#wspin').focus(); }
+    if (q('#wsset')) q('#wsset').onclick = function () { var v = q('#wsnew').value.trim(); if (v.length < 4) { toast('Use at least 4 digits.'); return; } lsSet(PIN, v); try { sessionStorage.setItem(UNL, '1'); } catch (e) {} toast('PIN saved. Tap Lock before handing the phone to staff.'); close(); render(); };
+    if (q('#wslock')) q('#wslock').onclick = function () { try { sessionStorage.removeItem(UNL); } catch (e) {} location.reload(); };
+    if (q('#wsoff')) q('#wsoff').onclick = function () { if (!confirm('Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.')) return; sheet = ''; lsSet(LS + '.sheet', null); if (window.WS_SET_SHEET) window.WS_SET_SHEET(null); close(); status(); };
+    if (q('#wscon')) q('#wscon').onclick = function () {
+      var v = q('#wsurl').value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { toast('Paste the Web app URL. It starts with https://script.google.com/macros/s/ and ends with /exec'); return; }
+      toast('Connecting…');
+      fetch(v + '?action=ping&t=' + now()).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ok) throw 0; if (!(j.v >= MINV)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
+        sheet = v; lsSet(LS + '.sheet', v); if (window.WS_SET_SHEET) window.WS_SET_SHEET(v); since = 0; lsSet(LS + '.since', 0); Object.keys(recs).forEach(function (p) { pend[p] = 1; }); saveAll();
+        toast('Connected to Google Sheet'); close(); pull().then(push);
+      }).catch(function () { toast('Could not reach that Sheet. Check the link and that access is set to Anyone.'); });
+    };
+  }
+  function render() {
+    if (!bar) { bar = el('<div id="wsbar"><span><b id="wswho"></b> · <span id="wsst"></span></span><button id="wsbtn"></button></div>');
+      document.body.insertBefore(bar, document.body.firstChild); bar.querySelector('#wsbtn').onclick = panel;
+      var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); }
+    bar.querySelector('#wswho').textContent = LOGIN ? LOGIN.name : isMgr() ? 'Manager' : 'Staff';
+    bar.querySelector('#wsbtn').textContent = LOGIN ? 'Google Sheet' : isMgr() ? 'PIN & Google Sheet' : 'Manager';
+    bar.querySelector('#wsbtn').hidden = !!(LOGIN && !LOGIN.manager);
+    status();
+  }
+  function boot() { render(); derive(); if (sheet) pull().then(push); }
+  if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  try { if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js'); } catch (e) {}
+})();
+</script>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num=v=>{const n=parseFloat(v);return isFinite(n)?n:0};
+const peso=n=>(num(n)<-0.004?"-":"")+"₱"+(Math.round(Math.abs(num(n))*100)/100).toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2});
+const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const today=()=>ymd(new Date());
+const fmtD=d=>new Date(d+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+const hhmm=()=>{const d=new Date();return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")};
+function toast(m){const t=document.createElement("div");t.className="toast";t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2400)}
+const LS="peddlers.v1";
+function lsGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+
+const S={db:null,dl:null,mgr:false,setup:{items:[],peddlers:[],comm:0},days:{},day:today(),tab:"day",open:{},loaded:false};
+
+/* ---------- money ---------- */
+const itemsAll=()=>S.setup.items||[];
+const items=()=>itemsAll().filter(i=>!i.gone);
+const peddlers=()=>(S.setup.peddlers||[]).filter(p=>!p.gone);
+const pName=id=>((S.setup.peddlers||[]).find(p=>p.id===id)||{}).name||"(removed peddler)";
+const iName=id=>(itemsAll().find(i=>i.id===id)||{}).name||"(removed bread)";
+const taken=(r,iid)=>(r.loads||[]).reduce((a,l)=>a+num((l.q||{})[iid]),0);
+const priceOf=(r,iid)=>r.price&&r.price[iid]!=null?num(r.price[iid]):num((itemsAll().find(i=>i.id===iid)||{}).price);
+function calc(r){
+  const ids=new Set();(r.loads||[]).forEach(l=>Object.keys(l.q||{}).forEach(k=>ids.add(k)));Object.keys(r.ret||{}).forEach(k=>ids.add(k));
+  let tk=0,rt=0,sold=0,sales=0;const lines=[];
+  ids.forEach(iid=>{const t=taken(r,iid),b=num((r.ret||{})[iid]),s=Math.max(0,t-b),p=priceOf(r,iid);tk+=t;rt+=b;sold+=s;sales+=s*p;if(t||b)lines.push({iid,t,b,s,p,amt:s*p})});
+  const comm=sales*num(r.comm)/100,due=sales-comm,paid=r.cash===""||r.cash==null?null:num(r.cash);
+  return {tk,rt,sold,sales,comm,due,paid,diff:paid==null?null:paid-due,lines};
+}
+/* running balance: everything turned in minus everything due, over settled days up to and including `upto` */
+function balance(pid,upto){
+  let b=0;Object.keys(S.days).forEach(d=>{if(upto&&d>upto)return;const r=((S.days[d]||{}).peddlers||{})[pid];if(!r)return;const c=calc(r);if(c.paid!=null)b+=c.diff});
+  return b;
+}
+
+/* ---------- saving ---------- */
+let saveT={},saving=0;
+function dayDoc(d){return S.days[d]||(S.days[d]={date:d,peddlers:{}})}
+function queueSave(d){clearTimeout(saveT[d]);$("#saved").textContent="Saving…";saveT[d]=setTimeout(()=>saveDay(d),500)}
+async function saveDay(d){
+  const doc=dayDoc(d);doc.date=d;
+  try{if(S.db)await S.db.collection("pdl/days").doc(d).set(JSON.parse(JSON.stringify(doc)));else{const l=lsGet(LS,{});l.days=S.days;lsSet(LS,l)}$("#saved").textContent="Saved"}
+  catch(e){$("#saved").textContent="Not saved: "+(e.message||e.code||"try again")}
+}
+async function saveSetup(){
+  try{if(S.db)await S.db.doc("pdl/setup").set(JSON.parse(JSON.stringify(S.setup)));else{const l=lsGet(LS,{});l.setup=S.setup;lsSet(LS,l)}toast("Saved")}
+  catch(e){toast("Not saved: "+(e.message||e.code))}
+}
+
+/* ---------- Today ---------- */
+function renderDay(){
+  if(!S.mgr)S.day=today();
+  $("#dayName").textContent=(S.day===today()?"Today, ":"")+fmtD(S.day);
+  $("#dayPick").value=S.day;
+  const doc=S.days[S.day]||{peddlers:{}},recs=doc.peddlers||{};
+  const ids=Object.keys(recs);
+  let tk=0,sold=0,sales=0,due=0,paid=0,short=0,out=0;
+  ids.forEach(id=>{const c=calc(recs[id]);tk+=c.tk;sold+=c.sold;sales+=c.sales;due+=c.due;if(c.paid==null)out++;else{paid+=c.paid;if(c.diff<0)short+=-c.diff}});
+  $("#tiles").innerHTML=`<div class="tile"><small>Peddlers out</small><b>${out} of ${ids.length}</b></div>
+   <div class="tile"><small>Bread taken</small><b>${tk}</b></div><div class="tile"><small>Sold</small><b>${sold}</b></div>
+   <div class="tile"><small>Sales</small><b>${peso(sales)}</b></div><div class="tile"><small>Cash turned in</small><b>${peso(paid)}</b></div>
+   <div class="tile ${short?"bad":""}"><small>Short today</small><b>${peso(short)}</b></div>`;
+  const ps=peddlers();
+  $("#who").innerHTML=ps.length?ps.map(p=>`<button class="chip ${recs[p.id]?"on":""}" data-p="${p.id}">${esc(p.name)}</button>`).join(""):`<span class="muted">${S.mgr?"No peddlers yet. Add them in Peddlers &amp; bread.":"No peddlers yet. Ask the manager to add them."}</span>`;
+  if(!S.loaded){$("#cards").innerHTML='<div class="empty">Opening…</div>';return}
+  if(!items().length&&S.mgr){$("#cards").innerHTML='<div class="empty"><b>Add your breads first</b>Open Peddlers &amp; bread to list the breads and prices.</div>';return}
+  if(!ids.length){$("#cards").innerHTML='<div class="empty"><b>No peddler sheets yet for this day</b>Tap a peddler\'s name above when they take bread out.</div>';return}
+  const order=ids.sort((a,b)=>(recs[a].at||0)-(recs[b].at||0));
+  $("#cards").innerHTML=order.map(id=>card(id,recs[id])).join("");
+}
+function card(pid,r){
+  const c=calc(r),open=S.open[pid]!==false&&(S.open[pid]||c.paid==null);
+  const bal=balance(pid,S.day);
+  const st=c.paid==null?['Out selling','p-out']:c.diff<-0.004?['Short '+peso(-c.diff),'p-bad']:c.diff>0.004?['Over '+peso(c.diff),'p-ok']:['Settled','p-ok'];
+  const balTxt=Math.abs(bal)<0.005?"":bal<0?`<span class="owe">Owes ${peso(-bal)} in total</span>`:`<span class="ahead">${peso(bal)} ahead in total</span>`;
+  const head=`<div class="hd"><div><div class="nm">${esc(pName(pid))}</div><div class="muted">${(r.loads||[]).length} load${(r.loads||[]).length===1?"":"s"} · ${c.tk} taken · ${c.sold} sold ${balTxt?" · "+balTxt:""}</div></div>
+    <div class="row"><span class="pill ${st[1]}">${st[0]}</span><button class="ghost" data-tog="${pid}">${open?"Hide":"Open"}</button></div></div>`;
+  if(!open)return `<div class="card" data-card="${pid}">${head}</div>`;
+  const L=r.loads||[],its=items().slice();
+  itemsAll().forEach(i=>{if(i.gone&&(taken(r,i.id)||num((r.ret||{})[i.id])))its.push(i)});
+  const rows=its.map(i=>{const t=taken(r,i.id),b=num((r.ret||{})[i.id]),s=Math.max(0,t-b),p=priceOf(r,i.id);
+    return `<tr><td>${esc(i.name)}<div class="muted">${peso(p)}</div></td>${L.map((l,k)=>`<td class="n"><input class="n" inputmode="numeric" data-pid="${pid}" data-load="${k}" data-i="${i.id}" value="${(l.q||{})[i.id]??""}" aria-label="${esc(i.name)} load ${k+1}"></td>`).join("")}
+      <td class="n"><input class="n" inputmode="numeric" data-pid="${pid}" data-ret="${i.id}" value="${(r.ret||{})[i.id]??""}" aria-label="${esc(i.name)} returned"></td>
+      <td class="n" data-sold="${pid}|${i.id}">${t||b?s:""}</td><td class="n" data-amt="${pid}|${i.id}">${t||b?peso(s*p):""}</td></tr>`}).join("");
+  return `<div class="card" data-card="${pid}">${head}
+   <div class="tbl"><table><thead><tr><th>Bread</th>${L.map((l,k)=>`<th class="n">Load ${k+1}<div style="font-weight:500;text-transform:none">${esc(l.t||"")}</div></th>`).join("")}<th class="n">Returned</th><th class="n">Sold</th><th class="n">Sales</th></tr></thead>
+   <tbody>${rows}</tbody></table></div>
+   <div class="row"><button data-load-add="${pid}">+ Another load</button>${L.length>1?`<button class="ghost" data-load-del="${pid}">Remove last load</button>`:""}</div>
+   <div class="sum" data-sum="${pid}">${sumHtml(r,c)}</div>
+   <div class="cash"><label><span>Cash turned in ₱</span><input class="n" inputmode="decimal" data-pid="${pid}" data-cash value="${r.cash??""}" placeholder="when they come back"></label>
+     <label><span>Commission %</span><input class="n" inputmode="decimal" data-pid="${pid}" data-comm value="${r.comm??""}" ${S.mgr?"":"disabled"}></label>
+     <label class="wide"><span>Note</span><input data-pid="${pid}" data-note value="${esc(r.note||"")}" placeholder="e.g. 3 pandesal spoiled"></label></div>
+   <div class="row muted">Recorded by ${esc(r.by||"—")}${S.mgr?` <button class="ghost danger" data-del="${pid}">Remove this sheet</button><span data-delask="${pid}"></span>`:""}</div></div>`;
+}
+function sumHtml(r,c){
+  return `<div><small>Sales</small><b>${peso(c.sales)}</b></div><div><small>Commission</small><b>${peso(c.comm)}</b></div>
+  <div><small>To turn in</small><b>${peso(c.due)}</b></div><div><small>${c.paid==null?"Turned in":c.diff<-0.004?"Short":c.diff>0.004?"Over":"Turned in"}</small><b class="${c.diff<-0.004?"owe":""}">${c.paid==null?"—":c.diff<-0.004||c.diff>0.004?peso(Math.abs(c.diff)):peso(c.paid)}</b></div>`;
+}
+function refreshCard(pid){
+  const r=dayDoc(S.day).peddlers[pid],c=calc(r);
+  itemsAll().forEach(i=>{const t=taken(r,i.id),b=num((r.ret||{})[i.id]),s=Math.max(0,t-b);
+    const a=document.querySelector(`[data-sold="${pid}|${i.id}"]`),m=document.querySelector(`[data-amt="${pid}|${i.id}"]`);
+    if(a)a.textContent=t||b?s:"";if(m)m.textContent=t||b?peso(s*priceOf(r,i.id)):""});
+  const s=document.querySelector(`[data-sum="${pid}"]`);if(s)s.innerHTML=sumHtml(r,c);
+}
+function startSheet(pid){
+  const doc=dayDoc(S.day);
+  if(doc.peddlers[pid]){S.open[pid]=true;renderDay();return}
+  const p=(S.setup.peddlers||[]).find(x=>x.id===pid)||{};
+  const price={};items().forEach(i=>price[i.id]=num(i.price));
+  doc.peddlers[pid]={loads:[{t:hhmm(),q:{}}],ret:{},price,comm:p.comm!=null&&p.comm!==""?num(p.comm):num(S.setup.comm),cash:"",note:"",by:me(),at:Date.now()};
+  S.open[pid]=true;queueSave(S.day);renderDay();
+  const f=document.querySelector(`[data-card="${pid}"] input[data-load="0"]`);if(f)f.focus();
+}
+const me=()=>(window.WS_USER&&window.WS_USER.name)||lsGet(LS+".by","")||"";
+
+/* input handling: update state and the numbers around it, never rebuild the inputs while typing */
+document.addEventListener("input",e=>{
+  const el=e.target,pid=el.dataset.pid;if(!pid||S.tab!=="day")return;
+  const r=dayDoc(S.day).peddlers[pid];if(!r)return;
+  const v=el.value.trim();
+  if(el.dataset.load!=null){const l=r.loads[+el.dataset.load];l.q=l.q||{};if(v==="")delete l.q[el.dataset.i];else l.q[el.dataset.i]=num(v)}
+  else if(el.dataset.ret){r.ret=r.ret||{};if(v==="")delete r.ret[el.dataset.ret];else r.ret[el.dataset.ret]=num(v)}
+  else if(el.hasAttribute("data-cash"))r.cash=v===""?"":num(v);
+  else if(el.hasAttribute("data-comm"))r.comm=num(v);
+  else if(el.hasAttribute("data-note"))r.note=el.value;
+  r.by=r.by||me();r.u=Date.now();
+  refreshCard(pid);queueSave(S.day);
+});
+document.addEventListener("focusout",()=>setTimeout(()=>{if(S.pending&&!typing()){S.pending=false;render()}},50));
+const typing=()=>{const a=document.activeElement;return a&&a.tagName==="INPUT"&&a.closest("#cards,#vSet")};
+$("#cards").addEventListener("change",e=>{if(e.target.hasAttribute("data-cash"))renderDay()});
+$("#cards").addEventListener("click",e=>{
+  const t=e.target;let id;
+  if(id=t.dataset.tog){S.open[id]=!(t.textContent==="Hide");renderDay()}
+  else if(id=t.dataset.loadAdd){const r=dayDoc(S.day).peddlers[id];r.loads.push({t:hhmm(),q:{}});queueSave(S.day);renderDay();const f=document.querySelector(`[data-card="${id}"] input[data-load="${r.loads.length-1}"]`);if(f)f.focus()}
+  else if(id=t.dataset.loadDel){const r=dayDoc(S.day).peddlers[id];if(r.loads.length>1){r.loads.pop();queueSave(S.day);renderDay()}}
+  else if(id=t.dataset.del){const a=document.querySelector(`[data-delask="${id}"]`);a.innerHTML=` <button class="danger" data-delyes="${id}">Yes, remove</button>`}
+  else if(id=t.dataset.delyes){delete dayDoc(S.day).peddlers[id];queueSave(S.day);renderDay();toast("Sheet removed")}
+});
+$("#who").addEventListener("click",e=>{const b=e.target.closest("[data-p]");if(b)startSheet(b.dataset.p)});
+$("#dayPick").addEventListener("change",e=>{if(e.target.value){S.day=e.target.value;renderDay()}});
+
+/* ---------- Report ---------- */
+let R={from:"",to:""};
+function renderRep(){
+  const t=today();if(!R.from){R.from=t.slice(0,8)+"01";R.to=t}
+  const days=Object.keys(S.days).filter(d=>d>=R.from&&d<=R.to).sort();
+  const byP={},byI={},byD=[];
+  days.forEach(d=>{const recs=S.days[d].peddlers||{};let ds={d,tk:0,sold:0,sales:0,due:0,paid:0};
+    Object.keys(recs).forEach(pid=>{const c=calc(recs[pid]),p=byP[pid]=byP[pid]||{pid,days:0,tk:0,rt:0,sold:0,sales:0,comm:0,due:0,paid:0,diff:0,open:0};
+      p.days++;p.tk+=c.tk;p.rt+=c.rt;p.sold+=c.sold;p.sales+=c.sales;p.comm+=c.comm;p.due+=c.due;if(c.paid==null)p.open++;else{p.paid+=c.paid;p.diff+=c.diff}
+      c.lines.forEach(l=>{const i=byI[l.iid]=byI[l.iid]||{iid:l.iid,t:0,b:0,s:0,amt:0};i.t+=l.t;i.b+=l.b;i.s+=l.s;i.amt+=l.amt});
+      ds.tk+=c.tk;ds.sold+=c.sold;ds.sales+=c.sales;ds.due+=c.due;ds.paid+=c.paid||0});
+    if(Object.keys(recs).length)byD.push(ds)});
+  const P=Object.values(byP).sort((a,b)=>b.sales-a.sales),I=Object.values(byI).sort((a,b)=>b.amt-a.amt);
+  const tot=P.reduce((a,p)=>({sales:a.sales+p.sales,comm:a.comm+p.comm,due:a.due+p.due,paid:a.paid+p.paid,diff:a.diff+p.diff,sold:a.sold+p.sold}),{sales:0,comm:0,due:0,paid:0,diff:0,sold:0});
+  const bals=(S.setup.peddlers||[]).map(p=>({p,b:balance(p.id)})).filter(x=>Math.abs(x.b)>=0.005);
+  $("#vRep").innerHTML=`<div class="row"><label><span>From</span><input type="date" id="rFrom" value="${R.from}"></label><label><span>To</span><input type="date" id="rTo" value="${R.to}"></label>
+    <button data-rng="month">This month</button><button data-rng="week">Last 7 days</button><button class="pri" id="rXl">Download Excel</button></div>
+   <div class="tiles"><div class="tile"><small>Sold</small><b>${tot.sold}</b></div><div class="tile"><small>Sales</small><b>${peso(tot.sales)}</b></div><div class="tile"><small>Commission</small><b>${peso(tot.comm)}</b></div>
+    <div class="tile"><small>To turn in</small><b>${peso(tot.due)}</b></div><div class="tile"><small>Turned in</small><b>${peso(tot.paid)}</b></div><div class="tile ${tot.diff<-0.004?"bad":""}"><small>Short / over</small><b>${peso(tot.diff)}</b></div></div>
+   <div class="sec"><h2>By peddler</h2>${P.length?`<div class="tbl"><table><thead><tr><th>Peddler</th><th class="n">Days</th><th class="n">Taken</th><th class="n">Returned</th><th class="n">Sold</th><th class="n">Sales</th><th class="n">Commission</th><th class="n">To turn in</th><th class="n">Turned in</th><th class="n">Short / over</th></tr></thead><tbody>
+     ${P.map(p=>`<tr><td>${esc(pName(p.pid))}${p.open?`<div class="muted">${p.open} day${p.open>1?"s":""} not settled</div>`:""}</td><td class="n">${p.days}</td><td class="n">${p.tk}</td><td class="n">${p.rt}</td><td class="n">${p.sold}</td><td class="n">${peso(p.sales)}</td><td class="n">${peso(p.comm)}</td><td class="n">${peso(p.due)}</td><td class="n">${peso(p.paid)}</td><td class="n ${p.diff<-0.004?"owe":""}">${peso(p.diff)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="muted">No peddler sales in these dates.</div>'}</div>
+   <div class="sec"><h2>Running balance (all days)</h2>${bals.length?`<div class="tbl"><table><tbody>${bals.map(x=>`<tr><td>${esc(x.p.name)}</td><td class="n ${x.b<0?"owe":"ahead"}">${x.b<0?"Owes "+peso(-x.b):peso(x.b)+" ahead"}</td></tr>`).join("")}</tbody></table></div>`:'<div class="muted">Every peddler is fully paid up.</div>'}</div>
+   <div class="sec"><h2>By bread</h2>${I.length?`<div class="tbl"><table><thead><tr><th>Bread</th><th class="n">Taken</th><th class="n">Returned</th><th class="n">Sold</th><th class="n">Return %</th><th class="n">Sales</th></tr></thead><tbody>
+     ${I.map(i=>`<tr><td>${esc(iName(i.iid))}</td><td class="n">${i.t}</td><td class="n">${i.b}</td><td class="n">${i.s}</td><td class="n">${i.t?Math.round(i.b/i.t*100)+"%":""}</td><td class="n">${peso(i.amt)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="muted">Nothing yet.</div>'}</div>
+   <div class="sec"><h2>By day</h2>${byD.length?`<div class="tbl"><table><thead><tr><th>Day</th><th class="n">Taken</th><th class="n">Sold</th><th class="n">Sales</th><th class="n">To turn in</th><th class="n">Turned in</th></tr></thead><tbody>
+     ${byD.reverse().map(d=>`<tr><td><button class="ghost" data-goday="${d.d}" style="padding:2px 0;white-space:nowrap">${esc(new Date(d.d+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric"}))}</button></td><td class="n">${d.tk}</td><td class="n">${d.sold}</td><td class="n">${peso(d.sales)}</td><td class="n">${peso(d.due)}</td><td class="n">${peso(d.paid)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="muted">Nothing yet.</div>'}</div>`;
+  $("#rFrom").onchange=e=>{R.from=e.target.value;renderRep()};$("#rTo").onchange=e=>{R.to=e.target.value;renderRep()};
+  $("#vRep").querySelectorAll("[data-rng]").forEach(b=>b.onclick=()=>{const t=today();if(b.dataset.rng==="month"){R.from=t.slice(0,8)+"01";R.to=t}else{const d=new Date();d.setDate(d.getDate()-6);R.from=ymd(d);R.to=t}renderRep()});
+  $("#vRep").querySelectorAll("[data-goday]").forEach(b=>b.onclick=()=>{S.day=b.dataset.goday;setTab("day")});
+  $("#rXl").onclick=()=>excel(days,P,I);
+}
+async function excel(days,P,I){
+  if(!window.XLSX)return toast("Excel isn't available right now.");
+  const det=[],cash=[];
+  days.forEach(d=>{const recs=S.days[d].peddlers||{};Object.keys(recs).forEach(pid=>{const r=recs[pid],c=calc(r);
+    c.lines.forEach(l=>{const row={Date:d,Peddler:pName(pid),Bread:iName(l.iid),Price:l.p};(r.loads||[]).forEach((ld,k)=>row["Load "+(k+1)]=num((ld.q||{})[l.iid]));Object.assign(row,{Taken:l.t,Returned:l.b,Sold:l.s,Sales:l.amt});det.push(row)});
+    cash.push({Date:d,Peddler:pName(pid),Loads:(r.loads||[]).length,Taken:c.tk,Returned:c.rt,Sold:c.sold,Sales:c.sales,"Commission %":num(r.comm),Commission:c.comm,"To turn in":c.due,"Turned in":c.paid==null?"":c.paid,"Short / over":c.diff==null?"not settled":c.diff,"Recorded by":r.by||"",Note:r.note||""})})});
+  const wb=XLSX.utils.book_new(),add=(n,rows,w)=>{const ws=XLSX.utils.json_to_sheet(rows.length?rows:[{"":"No data"}]);if(w)ws["!cols"]=w.map(x=>({wch:x}));XLSX.utils.book_append_sheet(wb,ws,n)};
+  add("By peddler",P.map(p=>({Peddler:pName(p.pid),Days:p.days,Taken:p.tk,Returned:p.rt,Sold:p.sold,Sales:p.sales,Commission:p.comm,"To turn in":p.due,"Turned in":p.paid,"Short / over":p.diff,"Days not settled":p.open,"Running balance (all days)":balance(p.pid)})),[18,6,8,9,7,11,11,11,11,11,9,14]);
+  add("By bread",I.map(i=>({Bread:iName(i.iid),Taken:i.t,Returned:i.b,Sold:i.s,Sales:i.amt})),[20,8,9,7,11]);
+  add("Cash per day",cash,[11,18,6,7,9,6,10,8,10,10,10,11,14,24]);
+  add("Bread per day",det,[11,18,20,7]);
+  const data=XLSX.write(wb,{bookType:"xlsx",type:"array"}),filename=`Peddler_sales_${R.from}_to_${R.to}.xlsx`;
+  if(!S.dl)return toast("Downloads aren't available here.");
+  try{await S.dl.save({filename,data:new Blob([data],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})})}catch(e){if(e&&e.code!=="declined")toast("Couldn't save: "+(e.message||e.code))}
+}
+
+/* ---------- Setup ---------- */
+function renderSet(){
+  const st=S.setup;
+  $("#vSet").innerHTML=`<div class="sec"><h2>Peddlers</h2><div class="muted">Commission % is what the peddler keeps from their sales. Leave blank to use the default.</div>
+    <div class="set muted" style="font-size:12px"><span>Name</span><span>Commission %</span><span></span></div>
+    ${(st.peddlers||[]).map(p=>`<div class="set ${p.gone?"gone":""}"><input data-pn="${p.id}" value="${esc(p.name)}"><input class="n" inputmode="decimal" data-pc="${p.id}" value="${p.comm??""}" placeholder="${num(st.comm)}"><button data-pg="${p.id}">${p.gone?"Bring back":"Remove"}</button></div>`).join("")}
+    <div class="set"><input id="newP" placeholder="New peddler's name"><input class="n" id="newPc" inputmode="decimal" placeholder="${num(st.comm)}"><button class="pri" id="addP">Add</button></div>
+    <label style="max-width:14em"><span>Default commission %</span><input class="n" id="defC" inputmode="decimal" value="${st.comm??0}"></label></div>
+   <div class="sec"><h2>Breads and prices</h2><div class="muted">The price peddlers sell at. A change applies to sheets started after it; today's open sheets keep their price.</div>
+    <div class="set muted" style="font-size:12px"><span>Bread</span><span>Price ₱</span><span></span></div>
+    ${itemsAll().map(i=>`<div class="set ${i.gone?"gone":""}"><input data-in="${i.id}" value="${esc(i.name)}"><input class="n" inputmode="decimal" data-ip="${i.id}" value="${i.price??""}"><button data-ig="${i.id}">${i.gone?"Bring back":"Remove"}</button></div>`).join("")}
+    <div class="set"><input id="newI" placeholder="New bread"><input class="n" id="newIp" inputmode="decimal" placeholder="0.00"><button class="pri" id="addI">Add</button></div>
+    <div class="err" id="setErr"></div></div>`;
+  const v=$("#vSet");
+  v.onchange=e=>{const t=e.target,d=t.dataset;let x;
+    if(d.pn&&(x=st.peddlers.find(p=>p.id===d.pn))&&t.value.trim())x.name=t.value.trim();
+    else if(d.pc&&(x=st.peddlers.find(p=>p.id===d.pc)))x.comm=t.value.trim()===""?"":num(t.value);
+    else if(d.in&&(x=st.items.find(i=>i.id===d.in))&&t.value.trim())x.name=t.value.trim();
+    else if(d.ip&&(x=st.items.find(i=>i.id===d.ip))){x.price=num(t.value);const doc=S.days[today()];if(doc)Object.values(doc.peddlers||{}).forEach(r=>{if(r.price&&r.price[x.id]==null)r.price[x.id]=x.price})}
+    else if(t.id==="defC")st.comm=num(t.value);
+    else return;
+    saveSetup()};
+  v.onclick=e=>{const d=e.target.dataset;let x;
+    if(d.pg&&(x=st.peddlers.find(p=>p.id===d.pg))){x.gone=!x.gone;saveSetup();renderSet()}
+    else if(d.ig&&(x=st.items.find(i=>i.id===d.ig))){x.gone=!x.gone;saveSetup();renderSet()}
+    else if(e.target.id==="addP"){const n=$("#newP").value.trim();if(!n)return;if((st.peddlers||[]).some(p=>p.name.toLowerCase()===n.toLowerCase()))return $("#setErr").textContent=n+" is already in the list.";
+      st.peddlers=st.peddlers||[];st.peddlers.push({id:uid("pd"),name:n,comm:$("#newPc").value.trim()===""?"":num($("#newPc").value)});saveSetup();renderSet()}
+    else if(e.target.id==="addI"){const n=$("#newI").value.trim();if(!n)return;if(itemsAll().some(i=>i.name.toLowerCase()===n.toLowerCase()))return $("#setErr").textContent=n+" is already in the list.";
+      st.items=st.items||[];st.items.push({id:uid("it"),name:n,price:num($("#newIp").value)});saveSetup();renderSet()}};
+}
+
+/* ---------- shell ---------- */
+function setTab(t){S.tab=t;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
+  $("#vDay").hidden=t!=="day";$("#vRep").hidden=t!=="rep";$("#vSet").hidden=t!=="set";render()}
+function render(){
+  if(typing()){S.pending=true;return}
+  document.querySelectorAll("[data-mgr]").forEach(el=>el.hidden=!S.mgr);
+  if(!S.mgr&&S.tab!=="day"){S.tab="day";return setTab("day")}
+  if(S.tab==="day")renderDay();else if(S.tab==="rep")renderRep();else renderSet();
+}
+$("#tabs").onclick=e=>{const b=e.target.closest("[data-tab]");if(b)setTab(b.dataset.tab)};
+setInterval(()=>{if(!S.mgr&&S.day!==today()){S.day=today();render()}},60000);
+render();
+
+(async()=>{
+  const C=window.claude;
+  const [db,user,dl]=C&&C.use?await Promise.all(["db","user","downloads"].map(n=>C.use(n).catch(()=>null))):[null,null,null];
+  S.db=db;S.dl=dl;
+  if(user){try{const [a,b]=await Promise.all([user.canEdit?user.canEdit():false,user.isOwner?user.isOwner():false]);S.mgr=!!(a||b)}catch(e){}}else S.mgr=true;
+  if(!db){const l=lsGet(LS,{});S.setup=Object.assign({items:[],peddlers:[],comm:0},l.setup||{});S.days=l.days||{};S.loaded=true;render();return}
+  db.doc("pdl/setup").onSnapshot(s=>{S.setup=Object.assign({items:[],peddlers:[],comm:0},s.exists?s.data():{});render()});
+  db.collection("pdl/days").onSnapshot(s=>{const m={};s.docs.forEach(d=>{m[d.id]=d.data()});
+    /* keep this phone's unsaved typing for days waiting to save */
+    Object.keys(saveT).forEach(d=>{if(S.days[d]&&saveT[d]&&$("#saved").textContent==="Saving…")m[d]=S.days[d]});
+    S.days=m;S.loaded=true;render()});
+})();
+</script>
+</body></html>
