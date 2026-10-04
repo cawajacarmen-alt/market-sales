@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Market Sales (no sign-in)</title><meta name="theme-color" content="#2f6b3a"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Mercedes Sales</title><meta name="theme-color" content="#2f6b3a"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&display=swap">
 <script>/*! xlsx.mini 0.18.5 (c) SheetJS LLC, Apache-2.0 */
@@ -215,8 +215,8 @@ td.wrapcell{white-space:normal;min-width:160px}
 
 <script>
 (function(){
-const LS="branchsales.offline.market.v1", PINK=LS+".pin", BKK=LS+".lastBackup";
-const SEED={"name": "Market", "cats": ["Salary", "Rent", "Electricity", "Water", "Supplies", "Transport", "Other"], "items": [{"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 5}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}, {"id": "itmurgnpei489", "name": "Malunggay Pandesal", "price": 0}, {"id": "itmuscdyn74nm", "name": "Buko Pie", "price": 180}]};
+const LS="branchsales.offline.mercedes.v1", PINK=LS+".pin", BKK=LS+".lastBackup";
+const SEED={"name": "Mercedes", "cats": ["Salary", "Rent", "Electricity", "Water", "Supplies", "Transport", "Other"], "items": [{"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 5}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}, {"id": "itmurgnpei489", "name": "Malunggay Pandesal", "price": 0}, {"id": "itmuscdyn74nm", "name": "Buko Pie", "price": 180}]};
 const $=id=>document.getElementById(id);
 const DEFAULT_CATS=["Salary","Rent","Electricity","Water","Supplies","Transport","Other"];
 const S={carry:null,name:"",items:[],branches:[{id:"main",name:""}],cats:DEFAULT_CATS.slice(),days:{},tab:"day",dDate:today(),dBranch:"",rDate:today(),rMode:"month",rBranch:""};
@@ -696,7 +696,7 @@ setSync("Saved on this phone only");
    Each phone keeps everything locally and also sends changed days to the owner's Google Sheet
    (an Apps Script web app). Every few minutes it pulls the Sheet so other phones' entries show up.
    Per day, the newest edit wins (S.days[d].u). */
-const SHB="market"; let shOK=SHB==="market"; // other branches send only to the updated (v2) script, so they never mix into Market
+const SHB="mercedes"; let shOK=SHB==="market"; // other branches send only to the updated (v2) script, so they never mix into Market
 const SHK=LS+".sheet", SHP=LS+".sheetPending", SHU=LS+".setupU";
 const lsGet=k=>{ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } };
 const lsSet=(k,v)=>{ try{ if(v) localStorage.setItem(k,v); else localStorage.removeItem(k); }catch(e){} };
