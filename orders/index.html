@@ -217,7 +217,7 @@ tfoot td{font-weight:600;background:var(--sunk)}
 <div class="viewer" id="viewer" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
-<script>window.WS_CFG={"app": "ord", "name": "Bakery Orders – Online", "split": [["^days/", {"orders": "map", "collections": "map"}]], "seed": {"app/setup": {"fee": 0, "items": [{"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 0}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}], "name": "", "riders": [{"id": "rmuriv7om3jaj", "name": "jimm"}, {"id": "rmurivq4kxc22", "name": "selo"}, {"id": "rmurivt4bid2y", "name": "anto"}]}}};
+<script>window.WS_CFG={"app": "ord", "name": "Bakery Orders – Online", "split": [["^days/", {"orders": "map", "collections": "map"}]], "seed": {"app/setup": {"fee": 0, "items": [{"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 0}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}], "name": "", "riders": [{"id": "rmuriv7om3jaj", "name": "jimm"}, {"id": "rmurivq4kxc22", "name": "selo"}, {"id": "rmurivt4bid2y", "name": "anto"}]}}, "minV": 3};
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
 // change different orders or receipts on the same day both keep their change.
@@ -268,13 +268,18 @@ function wsStamp(rec, doc, sp, now) {
   return out;
 }
 
+
 /* Website copy: stands in for the Claude account features the app was written for.
    - db: documents saved in this browser, and shared through the owner's Google Sheet when connected
    - user: manager (owner) after unlocking with the PIN, staff otherwise
    - downloads: a normal browser download
-   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script. */
+   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script.
+   Optional: minV (Sheet script version needed), feeds:{<other app>:{prefix:[...], split:[...]}} and local (regex):
+   documents read from other websites through the Sheet, turned into this page's own read-only documents
+   by window.WS_DERIVE(feeds, ownDoc) -> {path: doc}. Those documents stay on this phone. */
 (function () {
-  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); };
+  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); }, MINV = C.minV || 3;
+  var LOCAL = C.local ? new RegExp(C.local) : null, isLocal = function (p) { return !!(LOCAL && LOCAL.test(p)); };
   function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
   function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
   var clone = function (x) { return x == null ? x : JSON.parse(JSON.stringify(x)); };
@@ -313,7 +318,7 @@ function wsStamp(rec, doc, sp, now) {
     }, 0);
   }
   function write(p, doc) {
-    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush();
+    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush(); clearTimeout(write.d); write.d = setTimeout(derive, 800);
     return Promise.resolve();
   }
   function merge(a, b) {
@@ -346,6 +351,34 @@ function wsStamp(rec, doc, sp, now) {
   }
   var DB = { doc: DocRef, collection: function (c) { return Coll(c); } };
 
+
+  /* ---------- documents from the other websites ---------- */
+  var feeds = C.feeds || {}, fc = {};
+  Object.keys(feeds).forEach(function (a) { fc[a] = lsGet(LS + '.feed.' + a, { recs: {}, since: 0 }); });
+  function feedPull() {
+    var apps = Object.keys(feeds); if (!sheet || !navigator.onLine || !apps.length) return Promise.resolve();
+    var old = (function () { var d = new Date(); d.setDate(d.getDate() - 45); return d.toLocaleDateString('en-CA'); })();
+    return Promise.all(apps.map(function (a) {
+      return fetch(sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + 'action=docs&app=' + a + '&since=' + fc[a].since + '&t=' + now())
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) return;
+          Object.keys(j.docs || {}).forEach(function (p) { if (feeds[a].prefix.some(function (x) { return p.indexOf(x) === 0; })) fc[a].recs[p] = j.docs[p]; });
+          Object.keys(fc[a].recs).forEach(function (p) { var m = /(\d{4}-\d{2}-\d{2})$/.exec(p); if (m && m[1] < old) delete fc[a].recs[p]; });
+          fc[a].since = j.t || fc[a].since; lsSet(LS + '.feed.' + a, fc[a]);
+        }).catch(function () {});
+    })).then(derive);
+  }
+  function derive() {
+    if (!window.WS_DERIVE) return;
+    var F = {}, out;
+    Object.keys(feeds).forEach(function (a) { F[a] = {}; Object.keys(fc[a].recs).forEach(function (p) { var d = wsAssemble(fc[a].recs[p], wsSplitOf(feeds[a].split || [], p)); if (d) F[a][p] = d; }); });
+    try { out = window.WS_DERIVE(F, function (p) { return clone(docOf(p)); }) || {}; } catch (e) { console.error(e); return; }
+    var ch = [];
+    Object.keys(recs).forEach(function (p) { if (isLocal(p) && !(p in out) && docOf(p)) { recs[p] = wsStamp(recs[p], null, {}, now()); ch.push(p); } });
+    Object.keys(out).forEach(function (p) { if (JSON.stringify(docOf(p)) !== JSON.stringify(out[p])) { recs[p] = wsStamp(recs[p], out[p], {}, now()); ch.push(p); } });
+    if (ch.length) { saveAll(); changed(ch); }
+  }
+
   /* ---------- manager PIN ---------- */
   var PIN = LS + '.pin', UNL = LS + '.unlocked';
   var pin = function () { return lsGet(PIN, ''); };
@@ -367,19 +400,20 @@ function wsStamp(rec, doc, sp, now) {
   function queuePush() { if (!sheet) return; clearTimeout(pushT); pushT = setTimeout(push, 1200); }
   function api(params) { return sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + params + '&app=' + C.app + '&t=' + now(); }
   function push() {
+    Object.keys(pend).forEach(function (p) { if (isLocal(p)) delete pend[p]; });
     var ps = Object.keys(pend); if (!sheet || busy || !ps.length) return;
     if (!navigator.onLine) { status(''); return; }
     busy = true; var body = { action: 'docs', app: C.app, docs: {} }; ps.forEach(function (p) { body.docs[p] = recs[p]; });
     fetch(sheet, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
       .then(function (r) { return r.json(); })
-      .then(function (j) { if (!j.ok || !(j.v >= 3)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
+      .then(function (j) { if (!j.ok || !(j.v >= MINV)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
       .catch(function (e) { err = e && e.message === 'old' ? 'the Google Sheet script needs updating' : 'could not send to Google Sheet yet'; setTimeout(push, 30000); })
       .then(function () { busy = false; status(''); if (Object.keys(pend).length && !err) setTimeout(push, 500); });
   }
   function pull() {
     if (!sheet || !navigator.onLine) return Promise.resolve();
     return fetch(api('action=docs&since=' + since)).then(function (r) { return r.json(); }).then(function (j) {
-      if (!j.ok) throw 0; if (!(j.v >= 3)) { err = 'the Google Sheet script needs updating'; status(''); return; }
+      if (!j.ok) throw 0; if (!(j.v >= MINV)) { err = 'the Google Sheet script needs updating'; status(''); return; }
       var ch = [];
       Object.keys(j.docs || {}).forEach(function (p) { var m = wsMerge(recs[p], j.docs[p]);
         if (JSON.stringify(m) !== JSON.stringify(recs[p])) { recs[p] = m; ch.push(p); if (JSON.stringify(m) !== JSON.stringify(j.docs[p])) pend[p] = 1; } });
@@ -387,6 +421,7 @@ function wsStamp(rec, doc, sp, now) {
       if (ch.length) changed(ch);
       if (Object.keys(pend).length) push();
       status('');
+      return feedPull();
     }).catch(function () { err = 'could not reach Google Sheet'; status(''); });
   }
   // Tapping anything fetches the latest first (at most every 2 s), so a new order or receipt number counts the other phones' entries.
@@ -433,7 +468,7 @@ function wsStamp(rec, doc, sp, now) {
       if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { toast('Paste the Web app URL. It starts with https://script.google.com/macros/s/ and ends with /exec'); return; }
       toast('Connecting…');
       fetch(v + '?action=ping&t=' + now()).then(function (r) { return r.json(); }).then(function (j) {
-        if (!j.ok) throw 0; if (!(j.v >= 3)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
+        if (!j.ok) throw 0; if (!(j.v >= MINV)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
         sheet = v; lsSet(LS + '.sheet', v); since = 0; lsSet(LS + '.since', 0); Object.keys(recs).forEach(function (p) { pend[p] = 1; }); saveAll();
         toast('Connected to Google Sheet'); close(); pull().then(push);
       }).catch(function () { toast('Could not reach that Sheet. Check the link and that access is set to Anyone.'); });
@@ -447,7 +482,7 @@ function wsStamp(rec, doc, sp, now) {
     bar.querySelector('#wsbtn').textContent = isMgr() ? 'PIN & Google Sheet' : 'Manager';
     status();
   }
-  function boot() { render(); if (sheet) pull().then(push); }
+  function boot() { render(); derive(); if (sheet) pull().then(push); }
   if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   try { if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js'); } catch (e) {}

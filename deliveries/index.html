@@ -90,8 +90,7 @@ td a{color:inherit}
 .add input{min-width:0}
 .mainrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .mainrow input{flex:1 1 220px;min-width:0}
-#dReady{display:none}
-#tripForm th:nth-child(3),#tripForm td:nth-child(3){display:none}
+#syncNow{display:none}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.9rem;z-index:5}
 .sample{font-size:.75rem;font-weight:600;color:var(--pull);background:var(--pull-soft);padding:2px 8px;border-radius:99px}
 /* Delivery slip: always light and fixed width, so the saved PDF looks the same from any phone. */
@@ -197,7 +196,7 @@ tr.void td a{text-decoration:line-through}
     <div id="dBody" style="display:flex;flex-direction:column;gap:14px"></div>
     <div class="bar" style="justify-content:space-between"><h2>This day, all branches</h2><span class="bar"><button class="btn" id="slipAll">Day summaries PDF</button><button class="btn" id="recsAll">All receipts PDF</button></span></div>
     <div class="sheet" id="dAll"></div>
-    <p class="note">Delivered = sent from the main store. Pulled out = returned to the main store. Damaged = spoiled or broken at the branch. Net = Delivered − Pulled out − Damaged. Amount carried = Delivered × Price. Production issues a delivery receipt for every trip, each with its own number (DR-00001, DR-00002…). A wrong receipt can be voided: it stays on the list but is not counted. Changing a price on a new delivery also sets it for later deliveries; saved receipts keep their price.</p>
+    <p class="note">Delivered = sent from the main store. Pulled out = returned to the main store. Damaged = spoiled or broken at the branch. Net = Delivered − Pulled out − Damaged. Amount carried = Delivered × Price. Bread that passes inspection in Bakery Production shows under Available for delivery; every receipt deducts from it. Production issues a delivery receipt for every trip, each with its own number (DR-00001, DR-00002…). A wrong receipt can be voided: it stays on the list but is not counted. Changing a price on a new delivery also sets it for later deliveries; saved receipts keep their price.</p>
   </section>
 
   <!-- REPORT -->
@@ -255,7 +254,7 @@ tr.void td a{text-decoration:line-through}
 <div id="cap"></div>
 <div class="toast" id="toast" hidden></div>
 
-<script>window.WS_CFG={"app": "dlv", "name": "Branch Deliveries", "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]], "seed": {"delivery/setup": {"branches": [{"id": "brmurglkm530i", "name": "Market"}, {"id": "brmurgp8nbgdy", "name": "Mabuhay"}, {"id": "brmuscoi5ju23", "name": "Lugay"}, {"id": "brmuscomr3hcq", "name": "Mercedes"}, {"id": "brmuscos5tw7m", "name": "Main Branch"}], "items": [{"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 5}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}, {"id": "itmurgnpei489", "name": "Malunggay Pandesal", "price": 0}, {"id": "itmuscdyn74nm", "name": "Buko Pie", "price": 180}], "main": "Main store"}}};
+<script>window.WS_CFG={"app": "dlv", "name": "Branch Deliveries", "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]], "seed": {"delivery/setup": {"branches": [{"id": "brmurglkm530i", "name": "Market"}, {"id": "brmurgp8nbgdy", "name": "Mabuhay"}, {"id": "brmuscoi5ju23", "name": "Lugay"}, {"id": "brmuscomr3hcq", "name": "Mercedes"}, {"id": "brmuscos5tw7m", "name": "Main Branch"}], "items": [{"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 5}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}, {"id": "itmurgnpei489", "name": "Malunggay Pandesal", "price": 0}, {"id": "itmuscdyn74nm", "name": "Buko Pie", "price": 180}], "main": "Main store"}}, "minV": 3, "feeds": {"prd": {"prefix": ["bakery/log"], "split": [["^bakery/log/days/", {"orders": "map"}]]}}, "local": "^delivery/(setup/prod/|sync$)"};
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
 // change different orders or receipts on the same day both keep their change.
@@ -306,13 +305,38 @@ function wsStamp(rec, doc, sp, now) {
   return out;
 }
 
+// Deliveries website: bread that passed inspection on the Production website -> "Available for delivery".
+// Same as the Claude routine: Production days rows[pid].released, matched to delivery items by name.
+window.WS_DERIVE = function (F, own) {
+  var P = F.prd || {}, key = function (s) { return String(s || '').toLowerCase().split(/\s+/).filter(Boolean).join(' '); };
+  var num = function (v) { var x = Number(v); return isFinite(x) && x > 0 ? x : 0; };
+  var pname = {}; ((P['bakery/log'] || {}).products || []).forEach(function (p) { pname[p.id] = p.name || ''; });
+  var byName = {}; ((own('delivery/setup') || {}).items || []).forEach(function (i) { if (i.id) byName[key(i.name)] = i.id; });
+  var out = {}, any = false;
+  Object.keys(P).forEach(function (p) {
+    var m = /^bakery\/log\/days\/(\d{4}-\d{2}-\d{2})$/.exec(p); if (!m) return;
+    var rows = P[p].rows || {}, items = {};
+    Object.keys(rows).forEach(function (pid) { var q = num((rows[pid] || {}).released); if (!q) return;
+      var nm = pname[pid] || pid, k = byName[key(nm)] || 'x:' + (key(nm) || 'unknown');
+      (items[k] = items[k] || { name: nm, qty: 0 }).qty += q; });
+    if (Object.keys(items).length) { out['delivery/setup/prod/' + m[1]] = { date: m[1], items: items }; any = true; }
+  });
+  var prev = own('delivery/sync'), sig = JSON.stringify(out);
+  out['delivery/sync'] = prev && prev.sig === sig ? prev : { at: Date.now(), ok: true, sig: sig };
+  return out;
+};
+
 /* Website copy: stands in for the Claude account features the app was written for.
    - db: documents saved in this browser, and shared through the owner's Google Sheet when connected
    - user: manager (owner) after unlocking with the PIN, staff otherwise
    - downloads: a normal browser download
-   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script. */
+   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script.
+   Optional: minV (Sheet script version needed), feeds:{<other app>:{prefix:[...], split:[...]}} and local (regex):
+   documents read from other websites through the Sheet, turned into this page's own read-only documents
+   by window.WS_DERIVE(feeds, ownDoc) -> {path: doc}. Those documents stay on this phone. */
 (function () {
-  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); };
+  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); }, MINV = C.minV || 3;
+  var LOCAL = C.local ? new RegExp(C.local) : null, isLocal = function (p) { return !!(LOCAL && LOCAL.test(p)); };
   function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
   function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
   var clone = function (x) { return x == null ? x : JSON.parse(JSON.stringify(x)); };
@@ -351,7 +375,7 @@ function wsStamp(rec, doc, sp, now) {
     }, 0);
   }
   function write(p, doc) {
-    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush();
+    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush(); clearTimeout(write.d); write.d = setTimeout(derive, 800);
     return Promise.resolve();
   }
   function merge(a, b) {
@@ -384,6 +408,34 @@ function wsStamp(rec, doc, sp, now) {
   }
   var DB = { doc: DocRef, collection: function (c) { return Coll(c); } };
 
+
+  /* ---------- documents from the other websites ---------- */
+  var feeds = C.feeds || {}, fc = {};
+  Object.keys(feeds).forEach(function (a) { fc[a] = lsGet(LS + '.feed.' + a, { recs: {}, since: 0 }); });
+  function feedPull() {
+    var apps = Object.keys(feeds); if (!sheet || !navigator.onLine || !apps.length) return Promise.resolve();
+    var old = (function () { var d = new Date(); d.setDate(d.getDate() - 45); return d.toLocaleDateString('en-CA'); })();
+    return Promise.all(apps.map(function (a) {
+      return fetch(sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + 'action=docs&app=' + a + '&since=' + fc[a].since + '&t=' + now())
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) return;
+          Object.keys(j.docs || {}).forEach(function (p) { if (feeds[a].prefix.some(function (x) { return p.indexOf(x) === 0; })) fc[a].recs[p] = j.docs[p]; });
+          Object.keys(fc[a].recs).forEach(function (p) { var m = /(\d{4}-\d{2}-\d{2})$/.exec(p); if (m && m[1] < old) delete fc[a].recs[p]; });
+          fc[a].since = j.t || fc[a].since; lsSet(LS + '.feed.' + a, fc[a]);
+        }).catch(function () {});
+    })).then(derive);
+  }
+  function derive() {
+    if (!window.WS_DERIVE) return;
+    var F = {}, out;
+    Object.keys(feeds).forEach(function (a) { F[a] = {}; Object.keys(fc[a].recs).forEach(function (p) { var d = wsAssemble(fc[a].recs[p], wsSplitOf(feeds[a].split || [], p)); if (d) F[a][p] = d; }); });
+    try { out = window.WS_DERIVE(F, function (p) { return clone(docOf(p)); }) || {}; } catch (e) { console.error(e); return; }
+    var ch = [];
+    Object.keys(recs).forEach(function (p) { if (isLocal(p) && !(p in out) && docOf(p)) { recs[p] = wsStamp(recs[p], null, {}, now()); ch.push(p); } });
+    Object.keys(out).forEach(function (p) { if (JSON.stringify(docOf(p)) !== JSON.stringify(out[p])) { recs[p] = wsStamp(recs[p], out[p], {}, now()); ch.push(p); } });
+    if (ch.length) { saveAll(); changed(ch); }
+  }
+
   /* ---------- manager PIN ---------- */
   var PIN = LS + '.pin', UNL = LS + '.unlocked';
   var pin = function () { return lsGet(PIN, ''); };
@@ -405,19 +457,20 @@ function wsStamp(rec, doc, sp, now) {
   function queuePush() { if (!sheet) return; clearTimeout(pushT); pushT = setTimeout(push, 1200); }
   function api(params) { return sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + params + '&app=' + C.app + '&t=' + now(); }
   function push() {
+    Object.keys(pend).forEach(function (p) { if (isLocal(p)) delete pend[p]; });
     var ps = Object.keys(pend); if (!sheet || busy || !ps.length) return;
     if (!navigator.onLine) { status(''); return; }
     busy = true; var body = { action: 'docs', app: C.app, docs: {} }; ps.forEach(function (p) { body.docs[p] = recs[p]; });
     fetch(sheet, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
       .then(function (r) { return r.json(); })
-      .then(function (j) { if (!j.ok || !(j.v >= 3)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
+      .then(function (j) { if (!j.ok || !(j.v >= MINV)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
       .catch(function (e) { err = e && e.message === 'old' ? 'the Google Sheet script needs updating' : 'could not send to Google Sheet yet'; setTimeout(push, 30000); })
       .then(function () { busy = false; status(''); if (Object.keys(pend).length && !err) setTimeout(push, 500); });
   }
   function pull() {
     if (!sheet || !navigator.onLine) return Promise.resolve();
     return fetch(api('action=docs&since=' + since)).then(function (r) { return r.json(); }).then(function (j) {
-      if (!j.ok) throw 0; if (!(j.v >= 3)) { err = 'the Google Sheet script needs updating'; status(''); return; }
+      if (!j.ok) throw 0; if (!(j.v >= MINV)) { err = 'the Google Sheet script needs updating'; status(''); return; }
       var ch = [];
       Object.keys(j.docs || {}).forEach(function (p) { var m = wsMerge(recs[p], j.docs[p]);
         if (JSON.stringify(m) !== JSON.stringify(recs[p])) { recs[p] = m; ch.push(p); if (JSON.stringify(m) !== JSON.stringify(j.docs[p])) pend[p] = 1; } });
@@ -425,6 +478,7 @@ function wsStamp(rec, doc, sp, now) {
       if (ch.length) changed(ch);
       if (Object.keys(pend).length) push();
       status('');
+      return feedPull();
     }).catch(function () { err = 'could not reach Google Sheet'; status(''); });
   }
   // Tapping anything fetches the latest first (at most every 2 s), so a new order or receipt number counts the other phones' entries.
@@ -471,7 +525,7 @@ function wsStamp(rec, doc, sp, now) {
       if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { toast('Paste the Web app URL. It starts with https://script.google.com/macros/s/ and ends with /exec'); return; }
       toast('Connecting…');
       fetch(v + '?action=ping&t=' + now()).then(function (r) { return r.json(); }).then(function (j) {
-        if (!j.ok) throw 0; if (!(j.v >= 3)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
+        if (!j.ok) throw 0; if (!(j.v >= MINV)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
         sheet = v; lsSet(LS + '.sheet', v); since = 0; lsSet(LS + '.since', 0); Object.keys(recs).forEach(function (p) { pend[p] = 1; }); saveAll();
         toast('Connected to Google Sheet'); close(); pull().then(push);
       }).catch(function () { toast('Could not reach that Sheet. Check the link and that access is set to Anyone.'); });
@@ -485,7 +539,7 @@ function wsStamp(rec, doc, sp, now) {
     bar.querySelector('#wsbtn').textContent = isMgr() ? 'PIN & Google Sheet' : 'Manager';
     status();
   }
-  function boot() { render(); if (sheet) pull().then(push); }
+  function boot() { render(); derive(); if (sheet) pull().then(push); }
   if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   try { if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js'); } catch (e) {}
@@ -643,7 +697,7 @@ function renderReady(){
       ids.map(iid=>{ const x=m[iid]; return `<tr><td>${esc(iid.startsWith("x:")?x.name:iname(iid))}${iid.startsWith("x:")?`<span class="sub">Not in your item list here. Add it in Branches &amp; items with the same name.</span>`:""}</td><td>${fmt(x.ready)}</td><td>${fmt(x.sent)}</td><td><b>${fmt(Math.max(0,x.avail))}</b> ${availPill(x.avail,x.ready)}</td></tr>`; }).join("")
     }</tbody><tfoot><tr><td>Total</td><td>${fmt(T.ready)}</td><td>${fmt(T.sent)}</td><td>${fmt(Math.max(0,T.ready-T.sent))}</td></tr></tfoot></table></div>`
       :`<p class="note">No bread has passed inspection in Bakery Production for this day yet.</p>`}
-    <p class="note">Comes from Bakery Production: pieces that pass quality inspection there show here, and every delivery receipt deducts from them. It updates every hour from 5 AM to 8 PM, or right away when you tap Update now (takes a minute or two).</p>
+    <p class="note">Comes from Bakery Production: pieces that pass quality inspection there show here, and every delivery receipt deducts from them. It updates by itself within a minute of production saving an inspection on the Bakery Production website.</p>
     ${""&&lots.length?`<div class="lots">${lots.map(r=>`<div class="lot"><span><b>${timeTxt(r.time)}</b>${r.by?" · "+esc(r.by):""} · ${orderIds(Object.keys(r.items||{}),S.items).filter(iid=>n(r.items[iid])).map(iid=>esc(iname(iid))+" "+fmt(n(r.items[iid]))).join(", ")}${r.note?` <span class="sub">${esc(r.note)}</span>`:""}</span><span class="bar"><button class="btn sm" data-redit="${r.id}">Edit</button><button class="btn sm danger" data-rdel="${r.id}">${pendingConfirm==="r:"+r.id?"Tap again":"Remove"}</button></span></div>`).join("")}</div>`:""}
   </div>`;
 }
@@ -759,13 +813,13 @@ function formHTML(){
         return `<tr><td>${esc(iname(iid))}</td><td><input id="f-${iid}-price" type="number" min="0" step="0.01" inputmode="decimal" data-fi="${iid}" data-f="price" value="${p||""}" placeholder="₱" aria-label="${esc(iname(iid))} price"></td><td id="fv-${iid}">${availCell(left)}</td><td>${inp("sent")}</td><td>${inp("pulled")}</td><td>${inp("damaged")}</td><td id="fa-${iid}">${peso(n(it.sent)*p)}</td></tr>`; }).join("")
     }</tbody><tfoot><tr><td>Total</td><td></td><td></td><td id="ft-sent">${fmt(ft.sent)}</td><td id="ft-pulled">${fmt(ft.pulled)}</td><td id="ft-damaged">${fmt(ft.damaged)}</td><td id="ft-amt">${peso(ft.vSent)}</td></tr></tfoot></table></div>
     <div id="fWarn">${overTxt()}</div>
-    <p class="note">Delivered = bread the driver takes to the branch on this trip. Pulled out and Damaged = bread the driver brings back from the branch on this trip (leave blank if none).</p>
+    <p class="note">Available = bread that passed inspection in Bakery Production today, minus what other receipts already took. Delivered = bread the driver takes to the branch on this trip. Pulled out and Damaged = bread the driver brings back from the branch on this trip (leave blank if none).</p>
     <div class="trip"><label style="grid-column:1/-1">Notes<input id="fNote" value="${esc(f.note)}" placeholder="e.g. 2 trays short, stale bread pulled out"></label></div>
     <div class="bar"><button class="btn primary" type="submit">${old?"Save changes":"Save and issue receipt"}</button><button class="btn" type="button" id="fCancel">Cancel</button>${old?`<button class="btn danger" type="button" id="fVoid">${pendingConfirm==="v:"+old.id?"Tap again to void":"Void this receipt"}</button>`:""}</div>
   </form>`;
 }
 // Available for this trip = ready − delivered on the day's other receipts (an edited receipt's own pieces count as available).
-function formAvail(iid){ return null; const f=S.form, x=readyMap(f.date)[iid]; if(!x||!x.ready) return null;
+function formAvail(iid){ const f=S.form, x=readyMap(f.date)[iid]; if(!x||!x.ready) return null;
   const old=f.id?((S.days[f.date]||{}).drops||[]).find(t=>t.id===f.id):null; return x.avail+(old&&!old.void?qtyOf((old.items||{})[iid]).sent:0); }
 function availCell(left){ return left===null?`<span class="sub">not inspected yet</span>`:`<b>${fmt(Math.max(0,left))}</b><span class="avail ${left<0?"bad":"ok"}">${left<0?fmt(-left)+" more than ready":"left after this"}</span>`; }
 function overTxt(){ const f=S.form; if(!f) return ""; const over=Object.keys(f.items).filter(iid=>{ const av=formAvail(iid); return av!==null&&n((f.items[iid]||{}).sent)>av; });

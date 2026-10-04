@@ -1,17 +1,17 @@
-// Bakery websites — Google Sheet connector (version 3: branch sales, deliveries and online orders in one Sheet).
+// Bakery websites — Google Sheet connector (version 4: branch sales, deliveries, online orders and production in one Sheet).
 // Paste this into Extensions > Apps Script of your Google Sheet, then Deploy > New deployment >
 // Web app, Execute as: Me, Who has access: Anyone. Copy the Web app URL into the app (Branch & items > Google Sheet).
 //
 // Tabs it keeps:  Market: Daily totals, Sales, Expenses (for you to read)
 //                 Other branches: "Mabuhay Daily totals", "Mabuhay Sales", "Mabuhay Expenses", and so on
-//                 Deliveries, Online orders (one row per bread line / order)
+//                 Deliveries, Online orders, Production (one row per bread line / order)
 //                 Data (do not edit), App data (do not edit) (what the apps read back)
 //
 // To update an existing connection: paste this over the old script, Save, then
 // Deploy > Manage deployments > pencil icon > Version: New version > Deploy. The Web app URL stays the same.
 
 const DATA = 'Data (do not edit)';
-const VERSION = 3;
+const VERSION = 4;
 const NAMES = { market: 'Market', mabuhay: 'Mabuhay', mercedes: 'Mercedes', lugay: 'Lugay', main: 'Main Branch' };
 
 // Market keeps the original keys and tab names, so its earlier entries stay where they are.
@@ -122,7 +122,8 @@ const APPDATA = 'App data (do not edit)';
 const CHUNK = 45000; // a cell holds 50,000 characters, so long records (receipt pictures) span several cells
 const SPLITS = {
   dlv: [['^delivery/setup/days/', { drops: 'arr', ready: 'arr' }]],
-  ord: [['^days/', { orders: 'map', collections: 'map' }]]
+  ord: [['^days/', { orders: 'map', collections: 'map' }]],
+  prd: [['^bakery/log/days/', { orders: 'map' }]]
 };
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
@@ -210,11 +211,12 @@ function appPost_(app, docs) {
     } else { sh.appendRow(row); }
     const sp = wsSplitOf(SPLITS[app], p), d = wsAssemble(rec, sp);
     const m = /\/(\d{4}-\d{2}-\d{2})$/.exec(p);
-    if (m && (/^delivery\/setup\/days\//.test(p) || /^days\//.test(p))) dates[m[1]] = d || {};
+    if (m && (/^delivery\/setup\/days\//.test(p) || /^days\//.test(p) || /^bakery\/log\/days\//.test(p))) dates[m[1]] = d || {};
   });
   Object.keys(dates).forEach(function (date) {
     if (app === 'dlv') dlvReadable_(date, dates[date], all);
     if (app === 'ord') ordReadable_(date, dates[date], all);
+    if (app === 'prd') prdReadable_(date, dates[date], all);
   });
   return { ok: true, v: VERSION };
 }
@@ -246,4 +248,15 @@ function ordReadable_(date, d, all) {
       PAY[p.m] || '', p.paid ? 'Paid' : 'Not paid', p.ref || '', o.status || '', rn[o.rider] || '', o.remit ? 'Turned in' : '', o.cancel && o.cancel.reason ? o.cancel.reason : ''];
   });
   replace_(sheet_('Online orders', ['Date', 'Order no.', 'Time', 'Customer', 'Phone', 'Address', 'Breads', 'Total', 'Payment', 'Paid', 'Reference', 'Status', 'Rider', 'Rider cash', 'Cancel reason']), date, rows);
+}
+function prdReadable_(date, d, all) {
+  const st = all['prd|bakery/log'] ? setupOf_(all, 'prd|bakery/log') : {}, pn = {}, bn = {};
+  (st.products || []).forEach(function (p) { pn[p.id] = p.name; });
+  (st.bakers || []).forEach(function (b) { bn[b.id] = b.name; });
+  const rows = Object.keys(d.orders || {}).map(function (id) { return d.orders[id]; }).sort(function (a, b) { return (a.no || 0) - (b.no || 0); }).map(function (o) {
+    const done = o.status === 'inspected';
+    return [date, 'PO-' + date.replace(/-/g, '').slice(2) + '-' + (o.no || ''), pn[o.pid] || o.pid || '', Number(o.batches) || 0, bn[o.baker] || '', o.status || '',
+      o.yield === undefined ? '' : Number(o.yield) || 0, done ? Number(o.passed) || 0 : '', done ? Number(o.damaged) || 0 : '', o.why || '', o.note || ''];
+  });
+  replace_(sheet_('Production', ['Date', 'Order no.', 'Bread', 'Batches', 'Baker', 'Status', 'Counted', 'Passed (released)', 'Damaged', 'Damage reason', 'Note']), date, rows);
 }

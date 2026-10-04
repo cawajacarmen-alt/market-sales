@@ -1,0 +1,994 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><title>Bakery Production</title><meta name="theme-color" content="#b8741a"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"></head><body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600&display=swap">
+<script src="../lib/xlsx.full.min.js"></script>
+<style>
+/* Layout: one column worksheet. Tabs (Today / Report / Breads), summary strip, then the daily tally sheet. */
+:root{
+  --bg:#f6f6f2; --surface:#ffffff; --line:#dedcd2; --ink:#1d2b2a; --muted:#66706c;
+  --accent:#b8741a; --accent-ink:#ffffff; --accent-soft:#f6e7cf;
+  --made:#2f6f62; --dmg:#b23b2e; --rel:#b8741a; --left:#7b8580;
+  --dmg-soft:#f7dfdb; --ok-soft:#dcece7;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"Figtree", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141a19; --surface:#1c2423; --line:#2f3a38; --ink:#e8ece9; --muted:#9aa5a1;
+  --accent:#e0a24a; --accent-ink:#1d1607; --accent-soft:#3a2f1c;
+  --made:#6cc0ad; --dmg:#ef7b6d; --rel:#e0a24a; --left:#8f9a96;
+  --dmg-soft:#43231f; --ok-soft:#1f3a34; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141a19; --surface:#1c2423; --line:#2f3a38; --ink:#e8ece9; --muted:#9aa5a1;
+  --accent:#e0a24a; --accent-ink:#1d1607; --accent-soft:#3a2f1c;
+  --made:#6cc0ad; --dmg:#ef7b6d; --rel:#e0a24a; --left:#8f9a96;
+  --dmg-soft:#43231f; --ok-soft:#1f3a34; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:880px;margin:0 auto;padding-inline:16px;padding-block:20px 48px;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--display);font-size:1.9rem;line-height:1.1;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h1 small{display:block;font-family:var(--body);font-size:.8rem;font-weight:500;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px}
+h2{font-family:var(--display);font-size:1.2rem;margin:0}
+.sync{font-size:.8rem;color:var(--muted)}
+nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px;width:fit-content;max-width:100%}
+nav button{flex:none;border:0;background:transparent;color:var(--muted);font:600 .95rem var(--body);padding:8px 16px;border-radius:7px;cursor:pointer}
+nav button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 .9rem var(--body);padding:8px 12px;border-radius:8px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{color:var(--dmg)}
+.btn:disabled{opacity:.5;cursor:default}
+input,select{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.datelabel{font-family:var(--display);font-weight:600;font-size:1.05rem;min-width:0}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile .k{font-size:.72rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
+.tile .k i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.tile .v{font-family:var(--display);font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+.tile .s{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal;min-width:120px}
+thead th{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg)}
+tfoot td{font-weight:700;border-bottom:0;background:var(--bg)}
+tbody tr:last-child td{border-bottom:0}
+td input{width:76px;text-align:right;padding:6px 8px;font-variant-numeric:tabular-nums}
+td.neg{color:var(--dmg);font-weight:600}
+.pill{display:inline-block;font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:99px}
+.pill.hi{background:var(--dmg-soft);color:var(--dmg)}
+.pill.lo{background:var(--ok-soft);color:var(--made)}
+.mini{display:flex;height:8px;border-radius:3px;overflow:hidden;background:var(--bg);min-width:90px}
+.mini span{display:block;height:100%}
+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
+.note{font-size:.82rem;color:var(--muted);margin:0}
+.prod-row{display:grid;grid-template-columns:1fr 110px 100px auto auto auto;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+.prod-row.head{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg);padding-block:6px}
+.prod-row:last-child,.baker-row:last-child{border-bottom:0}
+.prod-row input,.baker-row input{width:100%;min-width:0}
+.baker-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+.add{display:grid;grid-template-columns:1fr 110px 100px auto;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--bg)}
+.add.two{grid-template-columns:1fr auto}
+.add input{min-width:0}
+td select{padding:6px 8px;max-width:150px}
+.sub{display:block;font-size:.75rem;color:var(--muted);font-weight:400}
+.diff{font-size:.75rem;font-weight:600}
+.diff.bad{color:var(--dmg)} .diff.ok{color:var(--made)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ofields{display:grid;grid-template-columns:1.4fr .7fr 1.2fr;gap:10px}
+.ofields label,.ostep label{display:flex;flex-direction:column;gap:4px;font-size:.78rem;font-weight:600;color:var(--muted);min-width:0}
+.ofields .wide{grid-column:1/-1}
+.ofields input,.ofields select{width:100%;min-width:0}
+.ohead{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;justify-content:space-between}
+.ohead b{font-family:var(--display);font-size:1.08rem}
+.ometa{font-size:.85rem;color:var(--muted)}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.steps span{font-size:.72rem;font-weight:600;text-align:center;padding:5px 2px;border-radius:6px;background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.steps span.done{background:var(--ok-soft);color:var(--made);border-color:transparent}
+.steps span.now{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.ostep{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.ostep input{width:110px}
+.ostep input.wide{width:220px;max-width:100%}
+.oresult{display:flex;flex-wrap:wrap;gap:6px 16px;font-variant-numeric:tabular-nums}
+.oresult span b{font-family:var(--display);font-size:1.1rem}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--muted);font:600 .82rem var(--body);padding:6px 11px;border-radius:99px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.card.cx{opacity:.6}
+@media (max-width:620px){ .ofields{grid-template-columns:1fr 1fr} .ofields label:first-child{grid-column:1/-1} }
+.chk{display:inline-block;font-size:.78rem;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap}
+.chk.ok{background:var(--ok-soft);color:var(--made)}
+.chk.bad{background:var(--dmg-soft);color:var(--dmg)}
+.chk.none{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.syncbox{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.syncbox b{display:block}
+td.sub2{white-space:normal}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.9rem;z-index:5}
+@media (max-width:620px){
+  nav button{padding:8px 11px}
+  .tiles{grid-template-columns:repeat(2,1fr)}
+  h1{font-size:1.55rem}
+  .prod-row{grid-template-columns:1fr 1fr auto}
+  .prod-row > input:first-child,.prod-row.head > span:first-child{grid-column:1/-1}
+  .prod-row .up{display:none}
+  .add{grid-template-columns:1fr 1fr}
+  .add:not(.two) > input:first-child{grid-column:1/-1}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><small>Bakery</small>Production Log</h1>
+    <span class="sync" id="sync">Loading…</span>
+  </header>
+
+  <nav role="tablist">
+    <button id="tab-day" role="tab" aria-selected="true" data-tab="day">Production orders</button>
+    <button id="tab-tally" role="tab" aria-selected="false" data-tab="tally">Tally</button>
+    <button id="tab-report" role="tab" aria-selected="false" data-tab="report">Report</button>
+    <button id="tab-breads" role="tab" aria-selected="false" data-tab="breads">Breads &amp; bakers</button>
+  </nav>
+
+  <!-- DAILY -->
+  <section id="view-day" style="display:flex;flex-direction:column;gap:14px">
+    <div class="bar">
+      <button class="btn" id="dPrev" aria-label="Previous day">‹</button>
+      <input type="date" id="dDate">
+      <button class="btn" id="dNext" aria-label="Next day">›</button>
+      <button class="btn" id="dToday">Today</button>
+      <span class="datelabel" id="dLabel"></span>
+    </div>
+    <div class="tiles" id="dTiles"></div>
+    <form class="card" id="oNew">
+      <h2>New production order</h2>
+      <div class="ofields">
+        <label>Bread<select id="oBread" required></select></label>
+        <label>Batches<input id="oBatches" type="number" min="0.5" step="0.5" inputmode="decimal" value="1" required></label>
+        <label>Baker<select id="oBaker"></select></label>
+        <label class="wide">Note<input id="oNote" placeholder="Optional, e.g. for market branch"></label>
+      </div>
+      <div class="bar"><button class="btn primary" type="submit">Create order</button><span class="note" id="oExp"></span></div>
+    </form>
+    <div class="bar" id="oFilter"></div>
+    <div id="oList" style="display:flex;flex-direction:column;gap:10px"></div>
+    <h2>Day summary by bread</h2>
+    <div class="sheet" id="dSheet"></div>
+    <p class="note">Each order goes through 4 steps: <b>Ordered</b> (assigned to a baker), <b>Baking</b> (baker started), <b>Counted</b> (production team counts the yield output), <b>Inspected</b> (after baking, pieces that pass quality inspection are released for delivery; damaged pieces are not released). Expected = batches × yield per batch from Breads &amp; bakers.</p>
+  </section>
+
+  <!-- TALLY -->
+  <section id="view-tally" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="bar">
+      <button class="btn" id="tPrev" aria-label="Previous day">‹</button>
+      <input type="date" id="tDate">
+      <button class="btn" id="tNext" aria-label="Next day">›</button>
+      <button class="btn" id="tToday">Today</button>
+      <span class="datelabel" id="tLabel"></span>
+    </div>
+    <div class="syncbox" id="tSync"></div>
+    <div class="tiles" id="tTiles"></div>
+    <div class="sheet" id="tSheet"></div>
+    <p class="note">Released is the pieces that passed quality inspection in Production orders. Went out is what Branch Deliveries shows as delivered to branches plus the bread in that day's online orders (cancelled orders not counted). <b>Short</b> means the bakery released more than reached the branches and online orders. <b>Over</b> means more went out than the bakery released. Left at bakery = Made − Damaged − Went out. Pull-outs and damage at the branches are shown for reference but do not change the tally.</p>
+    <h2>Recent days</h2>
+    <div class="sheet" id="tDays"></div>
+  </section>
+
+  <!-- REPORT -->
+  <section id="view-report" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="bar">
+      <select id="rMode">
+        <option value="day">Daily</option>
+        <option value="week">Weekly (Mon–Sun)</option>
+        <option value="month" selected>Monthly</option>
+        <option value="year">Yearly</option>
+      </select>
+      <button class="btn" id="rPrev" aria-label="Previous">‹</button>
+      <input type="date" id="rDate">
+      <button class="btn" id="rNext" aria-label="Next">›</button>
+      <span class="datelabel" id="rLabel"></span>
+      <button class="btn primary" id="rExcel" style="margin-left:auto">Download Excel</button>
+    </div>
+    <div class="tiles" id="rTiles"></div>
+    <h2>By bread</h2>
+    <div class="sheet" id="rByProd"></div>
+    <h2>By baker</h2>
+    <div class="sheet" id="rByBaker"></div>
+    <h2 id="rByDayH">By day</h2>
+    <div class="sheet" id="rByDay"></div>
+  </section>
+
+  <!-- BREADS -->
+  <section id="view-breads" hidden style="display:flex;flex-direction:column;gap:14px">
+    <h2>Breads</h2>
+    <p class="note">Yield per batch is how many pieces one batch of the recipe should make. The app uses it to show expected pieces and how close each baker got. Price is optional; when set, the report shows the value of bread released and damaged.</p>
+    <div class="sheet">
+      <div id="pList"></div>
+      <form class="add" id="pAdd">
+        <input id="pName" placeholder="Bread name, e.g. Pandesal" aria-label="Bread name" required>
+        <input id="pYield" type="number" step="1" min="0" inputmode="numeric" placeholder="Yield/batch" aria-label="Yield per batch">
+        <input id="pPrice" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Price ₱" aria-label="Price">
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+    </div>
+    <h2>Bakers</h2>
+    <p class="note">The people who bake. Pick one for each production order.</p>
+    <div class="sheet">
+      <div id="bList"></div>
+      <form class="add two" id="bAdd">
+        <input id="bName" placeholder="Baker name" aria-label="Baker name" required>
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>window.WS_CFG={"app": "prd", "name": "Bakery Production", "split": [["^bakery/log/days/", {"orders": "map"}]], "seed": {"bakery/log": {"bakers": [{"id": "kmusca9l7p0o", "name": "NILo"}], "products": [{"id": "bmusdj511eke", "name": "Monay", "price": 5, "yield": 500}, {"id": "bmusdk1be8eb", "name": "Pandesal Malunggay", "price": 5, "yield": 50}, {"id": "bmusc9xgyo97", "name": "Buko Pie", "price": 180, "yield": 8}]}}, "minV": 4, "feeds": {"dlv": {"prefix": ["delivery/setup"], "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]]}, "ord": {"prefix": ["days/", "app/setup"], "split": [["^days/", {"orders": "map", "collections": "map"}]]}}, "local": "^bakery/(log/links/|sync$)"};
+// Shared by the website pages and the Google Sheet script: one saved record per document.
+// A record keeps each piece of a document with the time it last changed, so two phones that
+// change different orders or receipts on the same day both keep their change.
+// rec = {u:{<unit>:{t:<ms>, v:<value>} | {t:<ms>, del:1}}}
+// Unit keys: "f" = whole field f; "f.m.<key>" = one entry of map field f; "f.a.<id>" = one item (by id) of array field f.
+function wsSplitOf(split, path) {
+  for (var i = 0; i < split.length; i++) if (new RegExp(split[i][0]).test(path)) return split[i][1];
+  return {};
+}
+function wsUnits(doc, sp) {
+  var u = {};
+  Object.keys(doc || {}).forEach(function (k) {
+    var v = doc[k];
+    if (sp[k] === 'map' && v && typeof v === 'object' && !Array.isArray(v)) Object.keys(v).forEach(function (s) { u[k + '.m.' + s] = v[s]; });
+    else if (sp[k] === 'arr' && Array.isArray(v)) v.forEach(function (x) { if (x && x.id != null) u[k + '.a.' + x.id] = x; });
+    else u[k] = v;
+  });
+  return u;
+}
+function wsAssemble(rec, sp) {
+  var d = {}, any = false;
+  Object.keys(sp).forEach(function (k) { d[k] = sp[k] === 'arr' ? [] : {}; });
+  Object.keys((rec && rec.u) || {}).forEach(function (key) {
+    var x = rec.u[key]; if (x.del) return; any = true;
+    var m = /^(.*?)\.(m|a)\.(.*)$/.exec(key);
+    if (m && sp[m[1]] === (m[2] === 'm' ? 'map' : 'arr')) { if (m[2] === 'm') d[m[1]][m[3]] = x.v; else d[m[1]].push(x.v); }
+    else d[key] = x.v;
+  });
+  return any ? d : null;
+}
+function wsMerge(a, b) {
+  var out = { u: {} }, au = (a && a.u) || {}, bu = (b && b.u) || {};
+  Object.keys(au).concat(Object.keys(bu)).forEach(function (k) {
+    var x = au[k], y = bu[k];
+    out.u[k] = !x ? y : !y ? x : (y.t > x.t || (y.t === x.t && JSON.stringify(y) > JSON.stringify(x))) ? y : x;
+  });
+  return out;
+}
+// New record after a page writes `doc` (null = deleted) over `rec`.
+function wsStamp(rec, doc, sp, now) {
+  var old = (rec && rec.u) || {}, nu = doc ? wsUnits(doc, sp) : {}, out = { u: {} };
+  Object.keys(old).forEach(function (k) { out.u[k] = old[k]; });
+  Object.keys(nu).forEach(function (k) {
+    var o = old[k];
+    if (!o || o.del || JSON.stringify(o.v) !== JSON.stringify(nu[k])) out.u[k] = { t: Math.max(now, o ? o.t + 1 : 0), v: nu[k] };
+  });
+  Object.keys(old).forEach(function (k) { if (!old[k].del && !(k in nu)) out.u[k] = { t: Math.max(now, old[k].t + 1), del: 1 }; });
+  return out;
+}
+
+// Production website Tally: what went out per bread per day, from the Deliveries and Online Orders websites.
+// Same as the Claude routine: delivery receipts (not void) per branch, and every non-cancelled online order.
+window.WS_DERIVE = function (F, own) {
+  var D = F.dlv || {}, O = F.ord || {}, key = function (s) { return String(s || '').toLowerCase().split(/\s+/).filter(Boolean).join(' '); };
+  var num = function (v) { var x = Number(v); return isFinite(x) && x > 0 ? x : 0; };
+  var byName = {}; ((own('bakery/log') || {}).products || []).forEach(function (p) { if (p.id) byName[key(p.name)] = p.id; });
+  var want = {};
+  var cell = function (date, name) { var doc = want[date] = want[date] || { date: date, items: {}, orders: 0 };
+    var k = byName[key(name)] || 'x:' + (key(name) || 'unknown');
+    return doc.items[k] = doc.items[k] || { name: name, branch: 0, online: 0, pulled: 0, bdmg: 0, by: {} }; };
+  var ds = D['delivery/setup'] || {}, items = {}, branches = {};
+  (ds.items || []).forEach(function (i) { items[i.id] = i.name || '(removed item)'; });
+  (ds.branches || []).forEach(function (b) { branches[b.id] = b.name || 'branch'; });
+  Object.keys(D).forEach(function (p) {
+    var m = /^delivery\/setup\/days\/(\d{4}-\d{2}-\d{2})$/.exec(p); if (!m) return;
+    (D[p].drops || []).forEach(function (t) { if (!t || t.void) return;
+      Object.keys(t.items || {}).forEach(function (iid) { var r = t.items[iid] || {}, sent = num(r.sent), pulled = num(r.pulled), dmg = num(r.damaged);
+        if (!(sent || pulled || dmg)) return;
+        var c = cell(m[1], items[iid] || '(removed item)'); c.branch += sent; c.pulled += pulled; c.bdmg += dmg;
+        if (sent) { var bn = branches[t.bid] || '(removed branch)'; c.by[bn] = (c.by[bn] || 0) + sent; } }); });
+  });
+  var oitems = {}; ((O['app/setup'] || {}).items || []).forEach(function (i) { oitems[i.id] = i.name; });
+  Object.keys(O).forEach(function (p) {
+    var m = /^days\/(\d{4}-\d{2}-\d{2})$/.exec(p); if (!m) return;
+    Object.keys(O[p].orders || {}).forEach(function (id) { var o = O[p].orders[id] || {}; if (o.status === 'cancelled') return; var got = false;
+      (o.items || []).forEach(function (i) { var q = num(i.qty); if (!q) return; cell(m[1], i.name || oitems[i.id] || '(removed item)').online += q; got = true; });
+      if (got) want[m[1]].orders++; });
+  });
+  var out = {};
+  Object.keys(want).forEach(function (d) { var doc = want[d]; doc.out = 0; Object.keys(doc.items).forEach(function (k) { doc.out += doc.items[k].branch + doc.items[k].online; }); out['bakery/log/links/' + d] = doc; });
+  var prev = own('bakery/sync'), sig = JSON.stringify(out);
+  out['bakery/sync'] = prev && prev.sig === sig ? prev : { at: Date.now(), ok: true, sig: sig };
+  return out;
+};
+
+/* Website copy: stands in for the Claude account features the app was written for.
+   - db: documents saved in this browser, and shared through the owner's Google Sheet when connected
+   - user: manager (owner) after unlocking with the PIN, staff otherwise
+   - downloads: a normal browser download
+   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script.
+   Optional: minV (Sheet script version needed), feeds:{<other app>:{prefix:[...], split:[...]}} and local (regex):
+   documents read from other websites through the Sheet, turned into this page's own read-only documents
+   by window.WS_DERIVE(feeds, ownDoc) -> {path: doc}. Those documents stay on this phone. */
+(function () {
+  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); }, MINV = C.minV || 3;
+  var LOCAL = C.local ? new RegExp(C.local) : null, isLocal = function (p) { return !!(LOCAL && LOCAL.test(p)); };
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  var clone = function (x) { return x == null ? x : JSON.parse(JSON.stringify(x)); };
+  var sp = function (p) { return wsSplitOf(C.split, p); };
+
+  /* ---------- local store ---------- */
+  var recs = lsGet(LS + '.docs', {}), pend = lsGet(LS + '.pending', {}), sheet = lsGet(LS + '.sheet', ''), since = lsGet(LS + '.since', 0);
+  Object.keys(C.seed || {}).forEach(function (p) { if (!recs[p]) recs[p] = wsStamp(null, C.seed[p], sp(p), 1); });
+  var cache = {};
+  function docOf(p) { if (!(p in cache)) cache[p] = wsAssemble(recs[p], sp(p)); return cache[p]; }
+  function saveAll() { if (!lsSet(LS + '.docs', recs)) status('Could not save. This phone may be out of space.'); lsSet(LS + '.pending', pend); }
+  saveAll();
+  var parent = function (p) { return p.slice(0, p.lastIndexOf('/')); };
+
+  /* ---------- listeners ---------- */
+  var subs = [];
+  function snapDoc(p) { var d = docOf(p); return { id: p.slice(p.lastIndexOf('/') + 1), exists: !!d, data: function () { return clone(d) || undefined; } }; }
+  function runQuery(q) {
+    var out = [];
+    Object.keys(recs).forEach(function (p) {
+      if (parent(p) !== q.coll) return; var d = docOf(p); if (!d) return;
+      for (var i = 0; i < q.where.length; i++) { var w = q.where[i], a = d[w[0]], b = w[2], op = w[1];
+        if (!(op === '==' ? a === b : op === '>=' ? a >= b : op === '<=' ? a <= b : op === '<' ? a < b : op === '>' ? a > b : op === '!=' ? a !== b : false)) return; }
+      out.push(snapDoc(p));
+    });
+    out.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+    return { docs: out, size: out.length, empty: !out.length, forEach: function (f) { out.forEach(f); } };
+  }
+  function changed(paths) {
+    paths.forEach(function (p) { delete cache[p]; });
+    setTimeout(function () {
+      subs.slice().forEach(function (s) {
+        if (s.doc ? paths.indexOf(s.doc) >= 0 : paths.some(function (p) { return parent(p) === s.q.coll; }))
+          try { s.fn(s.doc ? snapDoc(s.doc) : runQuery(s.q)); } catch (e) { console.error(e); }
+      });
+    }, 0);
+  }
+  function write(p, doc) {
+    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush(); clearTimeout(write.d); write.d = setTimeout(derive, 800);
+    return Promise.resolve();
+  }
+  function merge(a, b) {
+    for (var k in b) { var v = b[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { if (!a[k] || typeof a[k] !== 'object' || Array.isArray(a[k])) a[k] = {}; merge(a[k], v); }
+      else if (v === undefined) delete a[k]; else a[k] = v; }
+    return a;
+  }
+  function DocRef(p) {
+    return {
+      id: p.slice(p.lastIndexOf('/') + 1), path: p,
+      get: function () { return Promise.resolve(snapDoc(p)); },
+      set: function (d, o) { return write(p, o && o.merge ? merge(clone(docOf(p)) || {}, clone(d)) : clone(d)); },
+      update: function (d) { if (!docOf(p)) return Promise.reject({ code: 'not_found', message: 'Not found' }); return write(p, merge(clone(docOf(p)), clone(d))); },
+      delete: function () { return write(p, null); },
+      onSnapshot: function (fn) { var s = { doc: p, fn: fn }; subs.push(s); setTimeout(function () { fn(snapDoc(p)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; },
+      collection: function (c) { return Coll(p + '/' + c); }
+    };
+  }
+  function Coll(c, where) {
+    var q = { coll: c, where: where || [] };
+    return {
+      doc: function (id) { return DocRef(c + '/' + (id || 'd' + now().toString(36) + Math.random().toString(36).slice(2, 6))); },
+      add: function (d) { var r = DocRef(c + '/d' + now().toString(36) + Math.random().toString(36).slice(2, 6)); return r.set(d).then(function () { return r; }); },
+      where: function (f, op, v) { return Coll(c, q.where.concat([[f, op, v]])); },
+      orderBy: function () { return Coll(c, q.where); }, limit: function () { return Coll(c, q.where); },
+      get: function () { return Promise.resolve(runQuery(q)); },
+      onSnapshot: function (fn) { var s = { q: q, fn: fn }; subs.push(s); setTimeout(function () { fn(runQuery(q)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; }
+    };
+  }
+  var DB = { doc: DocRef, collection: function (c) { return Coll(c); } };
+
+
+  /* ---------- documents from the other websites ---------- */
+  var feeds = C.feeds || {}, fc = {};
+  Object.keys(feeds).forEach(function (a) { fc[a] = lsGet(LS + '.feed.' + a, { recs: {}, since: 0 }); });
+  function feedPull() {
+    var apps = Object.keys(feeds); if (!sheet || !navigator.onLine || !apps.length) return Promise.resolve();
+    var old = (function () { var d = new Date(); d.setDate(d.getDate() - 45); return d.toLocaleDateString('en-CA'); })();
+    return Promise.all(apps.map(function (a) {
+      return fetch(sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + 'action=docs&app=' + a + '&since=' + fc[a].since + '&t=' + now())
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) return;
+          Object.keys(j.docs || {}).forEach(function (p) { if (feeds[a].prefix.some(function (x) { return p.indexOf(x) === 0; })) fc[a].recs[p] = j.docs[p]; });
+          Object.keys(fc[a].recs).forEach(function (p) { var m = /(\d{4}-\d{2}-\d{2})$/.exec(p); if (m && m[1] < old) delete fc[a].recs[p]; });
+          fc[a].since = j.t || fc[a].since; lsSet(LS + '.feed.' + a, fc[a]);
+        }).catch(function () {});
+    })).then(derive);
+  }
+  function derive() {
+    if (!window.WS_DERIVE) return;
+    var F = {}, out;
+    Object.keys(feeds).forEach(function (a) { F[a] = {}; Object.keys(fc[a].recs).forEach(function (p) { var d = wsAssemble(fc[a].recs[p], wsSplitOf(feeds[a].split || [], p)); if (d) F[a][p] = d; }); });
+    try { out = window.WS_DERIVE(F, function (p) { return clone(docOf(p)); }) || {}; } catch (e) { console.error(e); return; }
+    var ch = [];
+    Object.keys(recs).forEach(function (p) { if (isLocal(p) && !(p in out) && docOf(p)) { recs[p] = wsStamp(recs[p], null, {}, now()); ch.push(p); } });
+    Object.keys(out).forEach(function (p) { if (JSON.stringify(docOf(p)) !== JSON.stringify(out[p])) { recs[p] = wsStamp(recs[p], out[p], {}, now()); ch.push(p); } });
+    if (ch.length) { saveAll(); changed(ch); }
+  }
+
+  /* ---------- manager PIN ---------- */
+  var PIN = LS + '.pin', UNL = LS + '.unlocked';
+  var pin = function () { return lsGet(PIN, ''); };
+  var unlocked = function () { try { return sessionStorage.getItem(UNL) === '1'; } catch (e) { return false; } };
+  var isMgr = function () { return !pin() || unlocked(); };
+  var USER = { isOwner: function () { return Promise.resolve(isMgr()); }, canEdit: function () { return Promise.resolve(isMgr()); },
+    id: function () { return Promise.resolve(isMgr() ? 'owner' : 'staff'); }, name: function () { return Promise.resolve(isMgr() ? 'Manager' : 'Staff'); } };
+
+  /* ---------- downloads ---------- */
+  var DL = { save: function (o) {
+    var a = document.createElement('a'), u = URL.createObjectURL(o.data instanceof Blob ? o.data : new Blob([o.data]));
+    a.href = u; a.download = o.filename || 'file'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+    return Promise.resolve(); } };
+
+  window.claude = { use: function (n) { return Promise.resolve(n === 'db' ? DB : n === 'user' ? USER : n === 'downloads' ? DL : null); } };
+
+  /* ---------- Google Sheet sharing ---------- */
+  var pushT = null, busy = false, lastOk = 0, err = '';
+  function queuePush() { if (!sheet) return; clearTimeout(pushT); pushT = setTimeout(push, 1200); }
+  function api(params) { return sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + params + '&app=' + C.app + '&t=' + now(); }
+  function push() {
+    Object.keys(pend).forEach(function (p) { if (isLocal(p)) delete pend[p]; });
+    var ps = Object.keys(pend); if (!sheet || busy || !ps.length) return;
+    if (!navigator.onLine) { status(''); return; }
+    busy = true; var body = { action: 'docs', app: C.app, docs: {} }; ps.forEach(function (p) { body.docs[p] = recs[p]; });
+    fetch(sheet, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.ok || !(j.v >= MINV)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
+      .catch(function (e) { err = e && e.message === 'old' ? 'the Google Sheet script needs updating' : 'could not send to Google Sheet yet'; setTimeout(push, 30000); })
+      .then(function () { busy = false; status(''); if (Object.keys(pend).length && !err) setTimeout(push, 500); });
+  }
+  function pull() {
+    if (!sheet || !navigator.onLine) return Promise.resolve();
+    return fetch(api('action=docs&since=' + since)).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw 0; if (!(j.v >= MINV)) { err = 'the Google Sheet script needs updating'; status(''); return; }
+      var ch = [];
+      Object.keys(j.docs || {}).forEach(function (p) { var m = wsMerge(recs[p], j.docs[p]);
+        if (JSON.stringify(m) !== JSON.stringify(recs[p])) { recs[p] = m; ch.push(p); if (JSON.stringify(m) !== JSON.stringify(j.docs[p])) pend[p] = 1; } });
+      since = j.t || since; lsSet(LS + '.since', since); saveAll(); lastOk = now(); err = '';
+      if (ch.length) changed(ch);
+      if (Object.keys(pend).length) push();
+      status('');
+      return feedPull();
+    }).catch(function () { err = 'could not reach Google Sheet'; status(''); });
+  }
+  // Tapping anything fetches the latest first (at most every 2 s), so a new order or receipt number counts the other phones' entries.
+  var lastTap = 0;
+  var tap = function () { if (now() - lastTap > 2000) { lastTap = now(); pull(); } };
+  document.addEventListener('pointerdown', tap, true); document.addEventListener('keydown', tap, true);
+  window.addEventListener('online', function () { push(); pull(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') pull(); });
+  setInterval(function () { if (document.visibilityState === 'visible') pull(); }, 30000);
+
+  /* ---------- bar + panel ---------- */
+  var css = '#wsbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:6px 16px;font:500 13px system-ui,sans-serif;background:#1f2a24;color:#e8efe9}' +
+    '#wsbar button{font:600 13px system-ui,sans-serif;border:1px solid #6d8b77;background:transparent;color:#e8efe9;border-radius:6px;padding:4px 10px;cursor:pointer}' +
+    '#wspanel{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px}' +
+    '#wspanel>div{background:#fff;color:#1a1a1a;border-radius:12px;padding:16px;max-width:460px;width:100%;display:grid;gap:10px;font:15px system-ui,sans-serif;max-height:100%;overflow:auto}' +
+    '#wspanel h3{margin:4px 0 0;font-size:16px}#wspanel p{margin:0;font-size:13px;color:#555}#wspanel .r{display:flex;gap:8px;flex-wrap:wrap}' +
+    '#wspanel input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid #bbb;border-radius:8px;color:#1a1a1a;background:#fff}' +
+    '#wspanel button{font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:8px;border:1px solid #bbb;background:#fff;color:#1a1a1a;cursor:pointer}#wspanel button.p{background:#2f6b3a;border-color:#2f6b3a;color:#fff}';
+  function el(h) { var d = document.createElement('div'); d.innerHTML = h; return d.firstChild; }
+  var bar;
+  function status() {
+    if (!bar) return; var s = bar.querySelector('#wsst');
+    var n = Object.keys(pend).length;
+    s.textContent = !sheet ? 'Saved on this phone only' : err ? 'Saved on this phone · ' + err : n ? (navigator.onLine ? 'Saved on this phone · sending to Google Sheet…' : 'Saved on this phone · will send when online') : 'Shared with Google Sheet' + (lastOk ? ' ' + new Date(lastOk).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  }
+  function toast(t) { var x = document.getElementById('wstoast'); if (!x) { x = el('<div id="wstoast" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:9px 16px;border-radius:8px;font:14px system-ui;z-index:60"></div>'); document.body.appendChild(x); } x.textContent = t; x.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(function () { x.hidden = true; }, 2600); }
+  function panel() {
+    var mgr = isMgr(), p = el('<div id="wspanel"><div>' +
+      (mgr ? '' : '<h3>Manager PIN</h3><div class="r"><input id="wspin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN"><button class="p" id="wsgo">Unlock</button></div>') +
+      (mgr ? '<h3>Manager PIN</h3><p>' + (pin() ? 'A PIN is set. Staff see only today until someone unlocks with it. Type a new one to change it.' : 'No PIN yet, so anyone with this page can see past days and reports. Set a PIN only you know.') + '</p><div class="r"><input id="wsnew" type="password" inputmode="numeric" autocomplete="off" placeholder="New PIN"><button class="p" id="wsset">Save PIN</button></div>' +
+        '<h3>Google Sheet</h3><p>' + (sheet ? 'Connected. Entries are shared with your Google Sheet and every phone or computer connected to it.' : 'Not connected. Entries stay only on this phone. Paste the Web app URL from your Google Sheet to share them.') + '</p>' +
+        '<div class="r"><input id="wsurl" placeholder="https://script.google.com/macros/s/…/exec" value="' + (sheet || '').replace(/"/g, '') + '"><button class="p" id="wscon">Connect</button></div>' + (sheet ? '<div class="r"><button id="wsoff">Disconnect this phone</button></div>' : '') : '') +
+      '<div class="r" style="justify-content:flex-end">' + (mgr && pin() ? '<button id="wslock">Lock (staff view)</button>' : '') + '<button id="wsx">Close</button></div></div></div>');
+    document.body.appendChild(p);
+    var q = function (s) { return p.querySelector(s); }, close = function () { p.remove(); };
+    q('#wsx').onclick = close; p.onclick = function (e) { if (e.target === p) close(); };
+    if (q('#wsgo')) { var go = function () { if (q('#wspin').value === pin()) { try { sessionStorage.setItem(UNL, '1'); } catch (e) {} location.reload(); } else toast('Wrong PIN'); };
+      q('#wsgo').onclick = go; q('#wspin').onkeydown = function (e) { if (e.key === 'Enter') go(); }; q('#wspin').focus(); }
+    if (q('#wsset')) q('#wsset').onclick = function () { var v = q('#wsnew').value.trim(); if (v.length < 4) { toast('Use at least 4 digits.'); return; } lsSet(PIN, v); try { sessionStorage.setItem(UNL, '1'); } catch (e) {} toast('PIN saved. Tap Lock before handing the phone to staff.'); close(); render(); };
+    if (q('#wslock')) q('#wslock').onclick = function () { try { sessionStorage.removeItem(UNL); } catch (e) {} location.reload(); };
+    if (q('#wsoff')) q('#wsoff').onclick = function () { if (!confirm('Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.')) return; sheet = ''; lsSet(LS + '.sheet', null); close(); status(); };
+    if (q('#wscon')) q('#wscon').onclick = function () {
+      var v = q('#wsurl').value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { toast('Paste the Web app URL. It starts with https://script.google.com/macros/s/ and ends with /exec'); return; }
+      toast('Connecting…');
+      fetch(v + '?action=ping&t=' + now()).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ok) throw 0; if (!(j.v >= MINV)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
+        sheet = v; lsSet(LS + '.sheet', v); since = 0; lsSet(LS + '.since', 0); Object.keys(recs).forEach(function (p) { pend[p] = 1; }); saveAll();
+        toast('Connected to Google Sheet'); close(); pull().then(push);
+      }).catch(function () { toast('Could not reach that Sheet. Check the link and that access is set to Anyone.'); });
+    };
+  }
+  function render() {
+    if (!bar) { bar = el('<div id="wsbar"><span><b id="wswho"></b> · <span id="wsst"></span></span><button id="wsbtn"></button></div>');
+      document.body.insertBefore(bar, document.body.firstChild); bar.querySelector('#wsbtn').onclick = panel;
+      var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); }
+    bar.querySelector('#wswho').textContent = isMgr() ? 'Manager' : 'Staff';
+    bar.querySelector('#wsbtn').textContent = isMgr() ? 'PIN & Google Sheet' : 'Manager';
+    status();
+  }
+  function boot() { render(); derive(); if (sheet) pull().then(push); }
+  if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  try { if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js'); } catch (e) {}
+})();
+</script>
+<script>
+(function(){
+const LS = "bakeryprod.v1";
+const $ = id => document.getElementById(id);
+const S = { products: [], bakers: [], days: {}, links: {}, sync: null, canFire: false, tab: "day", dDate: today(), tDate: today(), rDate: today(), rMode: "month" };
+const TRIG = "trig_01HbmSxXDGRdfDjtW5eKQ3gD"; // Claude routine that copies deliveries + online orders in
+let db = null, live = false, pendingConfirm = null;
+
+/* ---------- dates ---------- */
+function today(){ const d=new Date(); return iso(d); }
+function iso(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function parse(s){ const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); }
+function addDays(s,n){ const d=parse(s); d.setDate(d.getDate()+n); return iso(d); }
+const DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function nice(s){ const d=parse(s); return DOW[d.getDay()]+", "+MON[d.getMonth()]+" "+d.getDate()+", "+d.getFullYear(); }
+function short(s){ const d=parse(s); return DOW[d.getDay()]+" "+MON[d.getMonth()]+" "+d.getDate(); }
+function range(mode,s){
+  const d=parse(s);
+  if(mode==="day") return [s,s];
+  if(mode==="week"){ const off=(d.getDay()+6)%7; const a=addDays(s,-off); return [a,addDays(a,6)]; }
+  if(mode==="year") return [d.getFullYear()+"-01-01", d.getFullYear()+"-12-31"];
+  const a=new Date(d.getFullYear(),d.getMonth(),1), b=new Date(d.getFullYear(),d.getMonth()+1,0); return [iso(a),iso(b)];
+}
+function shift(mode,s,dir){
+  if(mode==="day") return addDays(s,dir);
+  if(mode==="week") return addDays(s,7*dir);
+  const d=parse(s);
+  if(mode==="year") return iso(new Date(d.getFullYear()+dir,0,1)); return iso(new Date(d.getFullYear(),d.getMonth()+dir,1));
+}
+function rangeLabel(mode,[a,b]){
+  if(mode==="day") return nice(a);
+  if(mode==="year") return "Year "+parse(a).getFullYear();
+  if(mode==="month"){ const d=parse(a); return ["January","February","March","April","May","June","July","August","September","October","November","December"][d.getMonth()]+" "+d.getFullYear(); }
+  return short(a)+" – "+short(b)+", "+parse(b).getFullYear();
+}
+
+/* ---------- math ---------- */
+const n = v => { const x=Number(v); return isFinite(x)&&x>0 ? x : 0; };
+function liveOrders(date){ const o=S.days[date]&&S.days[date].orders; return o?Object.values(o).filter(x=>x&&x.status!=="cancelled"):[]; }
+function orderRow(o){ const b=n(o.batches), y=pyield(o.pid), st=o.status; const counted=st==="counted"||st==="inspected";
+  return {made:counted?n(o.yield):0,damaged:st==="inspected"?n(o.damaged):0,released:st==="inspected"?n(o.passed):0,batches:b,baker:o.baker||"",expected:b&&y?Math.round(b*y):0}; }
+function hasOrders(date){ const o=S.days[date]&&S.days[date].orders; return !!(o&&Object.keys(o).length); }
+function rowOf(date,pid){
+  if(hasOrders(date)){ const rs=liveOrders(date).filter(o=>o.pid===pid).map(orderRow); const t={made:0,damaged:0,released:0,batches:0,expected:0}; const bk=new Set();
+    rs.forEach(r=>{["made","damaged","released","batches","expected"].forEach(k=>t[k]+=r[k]); if(r.baker) bk.add(r.baker);}); t.baker=bk.size===1?[...bk][0]:""; return t; }
+  const r=(S.days[date]&&S.days[date].rows&&S.days[date].rows[pid])||{}; const batches=n(r.batches), y=pyield(pid); return {made:n(r.made),damaged:n(r.damaged),released:n(r.released),batches,baker:r.baker||"",expected:batches&&y?Math.round(batches*y):0}; }
+function sum(rows){ const t={made:0,damaged:0,released:0,batches:0,expected:0,expMade:0,madeVsExp:0}; rows.forEach(r=>{t.made+=r.made;t.damaged+=r.damaged;t.released+=r.released;t.batches+=r.batches||0;t.expected+=r.expected||0; if(r.expected&&r.made){t.expMade+=r.expected;t.madeVsExp+=r.made;}}); t.batches=Math.round(t.batches*100)/100; t.left=t.made-t.damaged-t.released; return t; }
+function pct(a,b){ return b>0 ? a/b*100 : 0; }
+const fmt = x => x.toLocaleString("en-PH");
+const peso = x => "₱"+x.toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2});
+function pctTxt(p){ return (Math.round(p*10)/10)+"%"; }
+function datesIn([a,b]){ const out=[]; for(let s=a; s<=b; s=addDays(s,1)) out.push(s); return out; }
+function pidsUsed(dates){
+  const ids=new Set(S.products.map(p=>p.id));
+  dates.forEach(d=>{ const r=S.days[d]&&S.days[d].rows; if(r) Object.keys(r).forEach(k=>ids.add(k)); liveOrders(d).forEach(o=>ids.add(o.pid)); });
+  return [...ids];
+}
+function pname(id){ const p=S.products.find(p=>p.id===id); return p?p.name:"(removed bread)"; }
+function pyield(id){ const p=S.products.find(p=>p.id===id); return p&&n(p.yield)||0; }
+function bname(id){ const b=S.bakers.find(b=>b.id===id); return b?b.name:"(removed baker)"; }
+function pprice(id){ const p=S.products.find(p=>p.id===id); return p&&n(p.price)||0; }
+
+/* ---------- storage ---------- */
+function saveLocal(){ try{ localStorage.setItem(LS, JSON.stringify({products:S.products,bakers:S.bakers,days:S.days})); }catch(e){} }
+function loadLocal(){ try{ const j=JSON.parse(localStorage.getItem(LS)||"null"); if(j){ S.products=j.products||[]; S.bakers=j.bakers||[]; S.days=j.days||{}; } }catch(e){} }
+const timers={}, dirty=new Set();
+function queueDay(date){
+  saveLocal();
+  if(!live) return;
+  dirty.add(date); clearTimeout(timers[date]);
+  timers[date]=setTimeout(()=>writeDay(date),600);
+}
+const writing={};
+async function writeDay(date){
+  if(writing[date]){ writing[date]="again"; return; }
+  writing[date]=true; setSync("Saving…");
+  try{
+    const doc=S.days[date]||{rows:{}};
+    let rows=doc.rows||{};
+    if(hasOrders(date)){ rows={}; liveOrders(date).forEach(o=>{ const r=rowOf(date,o.pid); rows[o.pid]={batches:r.batches,made:r.made,damaged:r.damaged,released:r.released}; if(r.baker) rows[o.pid].baker=r.baker; }); doc.rows=rows; }
+    await db.collection("bakery/log/days").doc(date).set({date, rows, orders:doc.orders||{}, updatedAt:Date.now()});
+    dirty.delete(date); setSync("Saved");
+  }catch(e){ setSync("Could not save. Check your connection; changes are kept on this device."); }
+  const again=writing[date]==="again"; writing[date]=false; if(again) writeDay(date);
+}
+async function writeProducts(){
+  saveLocal();
+  if(!live) return;
+  setSync("Saving…");
+  try{ await db.doc("bakery/log").set({products:S.products, bakers:S.bakers, updatedAt:Date.now()}); setSync("Saved"); }
+  catch(e){ setSync("Could not save the bread list. Try again."); }
+}
+function setSync(t){ $("sync").textContent=t; }
+function toast(t){ const el=$("toast"); el.textContent=t; el.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>el.hidden=true,2200); }
+
+/* ---------- render: daily ---------- */
+function tiles(el,t,extra){
+  const dp=pct(t.damaged,t.made);
+  el.innerHTML=`
+   <div class="tile"><span class="k"><i style="background:var(--made)"></i>Made</span><span class="v">${fmt(t.made)}</span><span class="s">${extra&&extra.made||"pieces baked"}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--dmg)"></i>Damaged</span><span class="v">${fmt(t.damaged)}</span><span class="s"><span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)} of made</span>${extra&&extra.dmgVal?" · "+extra.dmgVal:""}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--rel)"></i>Released</span><span class="v">${fmt(t.released)}</span><span class="s">${pctTxt(pct(t.released,t.made))} of made${extra&&extra.relVal?" · "+extra.relVal:""}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--left)"></i>Left</span><span class="v" style="${t.left<0?"color:var(--dmg)":""}">${fmt(t.left)}</span><span class="s">${t.left<0?"more out than made":"not yet released"}</span></div>`;
+}
+function values(dates,pids){
+  let rel=0,dmg=0,has=false;
+  pids.forEach(id=>{ const pr=pprice(id); if(pr) has=true; dates.forEach(d=>{ const r=rowOf(d,id); rel+=r.released*pr; dmg+=r.damaged*pr; }); });
+  return has?{relVal:peso(rel),dmgVal:peso(dmg)}:null;
+}
+function bakerOpts(sel){
+  return `<option value="">Not set</option>`+S.bakers.filter(b=>!b.gone).map(b=>`<option value="${b.id}"${b.id===sel?" selected":""}>${esc(b.name)}</option>`).join("")
+    +(sel&&!S.bakers.some(b=>b.id===sel&&!b.gone)?`<option value="${sel}" selected>${esc(bname(sel))}</option>`:"");
+}
+function expTxt(r){ return r.expected? fmt(r.expected) : "–"; }
+function diffTxt(r){
+  if(!r.expected||!r.made) return "";
+  const d=r.made-r.expected; if(!d) return ` <span class="diff ok">on target</span>`;
+  return ` <span class="diff ${d<0?"bad":"ok"}">${d>0?"+":""}${fmt(d)}</span>`;
+}
+const STEPS=[["ordered","Ordered"],["baking","Baking"],["counted","Counted"],["inspected","Inspected"]];
+const SIDX={ordered:0,baking:1,counted:2,inspected:3};
+function poNo(date,o){ return "PO-"+date.replace(/-/g,"").slice(2)+"-"+o.no; }
+function dayOrders(date){ const o=(S.days[date]&&S.days[date].orders)||{}; return Object.entries(o).map(([id,v])=>Object.assign({id},v)).sort((a,b)=>(a.no||0)-(b.no||0)); }
+function hm(ms){ if(!ms) return ""; const d=new Date(ms); return d.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}); }
+function orderCard(date,o){
+  const y=pyield(o.pid), exp=n(o.batches)&&y?Math.round(n(o.batches)*y):0, st=o.status, i=SIDX[st];
+  const at=o.at||{};
+  const steps=st==="cancelled"?"":`<div class="steps">${STEPS.map(([k,l],j)=>`<span class="${j<i?"done":j===i?(st==="inspected"?"done":"now"):""}">${j<i||st==="inspected"&&j===i?"✓ ":""}${l}${at[k]?`<br><small style="font-weight:500">${hm(at[k])}</small>`:""}</span>`).join("")}</div>`;
+  let body="";
+  if(st==="ordered") body=`<div class="ostep"><span class="note">Waiting for ${o.baker?esc(bname(o.baker)):"a baker"} to start.</span><button class="btn primary" data-act="start" data-oid="${o.id}">Start baking</button></div>`;
+  else if(st==="baking") body=`<div class="ostep"><label>Yield output (pcs counted)<input type="number" min="0" step="1" inputmode="numeric" id="y-${o.id}" data-oid="${o.id}" placeholder="${exp||"pcs"}"></label><button class="btn primary" data-act="count" data-oid="${o.id}">Save count</button>${exp?`<span class="note">Expected ${fmt(exp)} pcs</span>`:""}</div>`;
+  else if(st==="counted") body=`<div class="oresult"><span>Counted <b>${fmt(n(o.yield))}</b> pcs${diffTxt({made:n(o.yield),expected:exp})}</span></div>
+    <div class="ostep"><label>Passed inspection<input type="number" min="0" step="1" inputmode="numeric" id="p-${o.id}" data-oid="${o.id}" value="${n(o.yield)}"></label><label>Damaged<input type="number" min="0" step="1" inputmode="numeric" id="dm-${o.id}" data-oid="${o.id}" value="0"></label><label>Reason if damaged<input class="wide" id="w-${o.id}" data-oid="${o.id}" placeholder="e.g. burnt, flat"></label><button class="btn primary" data-act="inspect" data-oid="${o.id}">Save inspection</button></div>`;
+  else if(st==="inspected"){ const lost=n(o.yield)-n(o.passed)-n(o.damaged);
+    body=`<div class="oresult"><span>Counted <b>${fmt(n(o.yield))}</b></span><span style="color:var(--made)">Released for delivery <b>${fmt(n(o.passed))}</b></span><span style="color:var(--dmg)">Damaged <b>${fmt(n(o.damaged))}</b>${o.why?` (${esc(o.why)})`:""}</span>${lost?`<span class="diff bad">${lost>0?fmt(lost)+" pcs not accounted for":fmt(-lost)+" pcs more than counted"}</span>`:""}</div>`; }
+  else if(st==="cancelled") body=`<span class="note">Cancelled${o.why?": "+esc(o.why):""}</span>`;
+  const back=st!=="ordered"&&st!=="cancelled"?`<button class="btn" data-act="undo" data-oid="${o.id}">Undo last step</button>`:"";
+  const cx=st==="ordered"||st==="baking"?`<button class="btn danger" data-act="cancel" data-oid="${o.id}">${pendingConfirm===o.id?"Tap again to cancel":"Cancel order"}</button>`:st==="cancelled"?`<button class="btn" data-act="restore" data-oid="${o.id}">Restore</button>`:"";
+  return `<div class="card${st==="cancelled"?" cx":""}"><div class="ohead"><b>${esc(pname(o.pid))} · ${fmt(n(o.batches))} batch${n(o.batches)===1?"":"es"}</b><span class="ometa">${poNo(date,o)} · ${o.baker?"Baker: "+esc(bname(o.baker)):"No baker yet"}${exp?" · expect "+fmt(exp)+" pcs":""}</span></div>
+    ${o.note?`<span class="ometa">${esc(o.note)}</span>`:""}${steps}${body}${back||cx?`<div class="bar">${back}${cx}</div>`:""}</div>`;
+}
+function renderOrderForm(){
+  const sel=$("oBread").value; $("oBread").innerHTML=S.products.length?S.products.map(p=>`<option value="${p.id}"${p.id===sel?" selected":""}>${esc(p.name)}</option>`).join(""):`<option value="">Add breads first</option>`;
+  const bs=$("oBaker").value; $("oBaker").innerHTML=bakerOpts(bs);
+  updExp();
+}
+function updExp(){ const y=pyield($("oBread").value), b=n($("oBatches").value); $("oExp").textContent=y&&b?"Expected about "+fmt(Math.round(y*b))+" pcs":y?"":"Set the yield per batch in Breads & bakers to see expected pieces."; }
+function renderDay(){
+  const d=S.dDate; $("dDate").value=d; $("dLabel").textContent=nice(d)+(d===today()?" · today":"");
+  const os=dayOrders(d), live=os.filter(o=>o.status!=="cancelled");
+  const cnt=k=>live.filter(o=>o.status===k).length;
+  const t=sum(live.map(orderRow));
+  const waiting=live.filter(o=>o.status==="counted").reduce((a,o)=>a+n(o.yield),0);
+  $("dTiles").innerHTML=`
+   <div class="tile"><span class="k"><i style="background:var(--accent)"></i>Orders</span><span class="v">${live.length}</span><span class="s">${fmt(t.batches)} batches · ${cnt("ordered")} waiting · ${cnt("baking")} baking</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--made)"></i>Counted</span><span class="v">${fmt(t.made)}</span><span class="s">${t.expected?"of "+fmt(t.expected)+" expected":"pieces of yield output"}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--rel)"></i>Released</span><span class="v">${fmt(t.released)}</span><span class="s">passed inspection${waiting?" · "+fmt(waiting)+" waiting":""}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--dmg)"></i>Damaged</span><span class="v">${fmt(t.damaged)}</span><span class="s"><span class="pill ${pct(t.damaged,t.made)>=5?"hi":"lo"}">${pctTxt(pct(t.damaged,t.made))} of counted</span></span></div>`;
+  renderOrderForm();
+  const F=S.oFilter||"all", counts={all:os.length,open:live.filter(o=>o.status!=="inspected").length,inspected:cnt("inspected")};
+  $("oFilter").innerHTML=os.length?[["all","All"],["open","Not finished"],["inspected","Inspected"]].map(([k,l])=>`<button type="button" class="chip" data-f="${k}" aria-pressed="${F===k}">${l} ${counts[k]}</button>`).join(""):"";
+  const shown=os.filter(o=>F==="all"||(F==="open"?o.status!=="inspected"&&o.status!=="cancelled":o.status==="inspected"));
+  $("oList").innerHTML=!S.products.length?`<div class="empty card">No breads yet. Open <b>Breads &amp; bakers</b> to add your breads and bakers first.</div>`
+    :shown.length?shown.map(o=>orderCard(d,o)).join(""):`<div class="empty card">${os.length?"No orders in this list.":"No production orders for this day yet. Create one above."}</div>`;
+  const legacy=!hasOrders(d)&&S.days[d]&&Object.keys(S.days[d].rows||{}).length;
+  const pids=pidsUsed([d]).filter(id=>rowOf(d,id).batches||rowOf(d,id).made||rowOf(d,id).released);
+  $("dSheet").innerHTML=!pids.length?`<div class="empty">Nothing yet.</div>`:`<table><thead><tr><th>Bread</th><th>Batches</th><th>Expected</th><th>Counted</th><th>Passed (released)</th><th>Damaged</th><th>Damage %</th></tr></thead><tbody>${
+    pids.map(id=>{ const r=rowOf(d,id), dp=pct(r.damaged,r.made); return `<tr><td>${esc(pname(id))}</td><td>${fmt(r.batches)}</td><td>${r.expected?fmt(r.expected):"–"}</td><td>${fmt(r.made)}${diffTxt(r)}</td><td>${fmt(r.released)}</td><td>${fmt(r.damaged)}</td><td>${r.made?`<span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)}</span>`:"–"}</td></tr>`; }).join("")
+  }</tbody></table>${legacy?`<p class="note" style="padding:8px 12px">This day was logged before production orders.</p>`:""}`;
+}
+function setOrder(date,id,patch){
+  S.days[date]=S.days[date]||{date,rows:{},orders:{}}; S.days[date].orders=Object.assign({},S.days[date].orders||{});
+  const o=Object.assign({},S.days[date].orders[id]||{},patch); o.at=Object.assign({},(S.days[date].orders[id]||{}).at||{},patch.at||{});
+  S.days[date].orders[id]=o; queueDay(date); renderDay();
+}
+function onOrderAct(e){
+  const b=e.target.closest("button[data-act]"); if(!b) return;
+  const d=S.dDate, id=b.dataset.oid, o=(S.days[d].orders||{})[id]; if(!o) return; const now=Date.now();
+  const act=b.dataset.act;
+  if(act==="start") return setOrder(d,id,{status:"baking",at:{baking:now}});
+  if(act==="count"){ const v=$("y-"+id).value; if(v===""){ toast("Type how many pieces were counted"); $("y-"+id).focus(); return; }
+    return setOrder(d,id,{status:"counted",yield:Math.max(0,Math.floor(Number(v)||0)),at:{counted:now}}); }
+  if(act==="inspect"){ const p=Math.max(0,Math.floor(Number($("p-"+id).value)||0)), dm=Math.max(0,Math.floor(Number($("dm-"+id).value)||0)), why=$("w-"+id).value.trim();
+    if(dm&&!why){ toast("Write why the pieces were damaged"); $("w-"+id).focus(); return; }
+    return setOrder(d,id,{status:"inspected",passed:p,damaged:dm,why,at:{inspected:now}}); }
+  if(act==="undo"){ const prev={baking:"ordered",counted:"baking",inspected:"counted"}[o.status]; if(prev) setOrder(d,id,{status:prev}); return; }
+  if(act==="cancel"){ if(pendingConfirm!==id){ pendingConfirm=id; renderDay(); setTimeout(()=>{ if(pendingConfirm===id){ pendingConfirm=null; renderDay(); } },4000); return; }
+    pendingConfirm=null; return setOrder(d,id,{status:"cancelled",prevStatus:o.status,at:{cancelled:now}}); }
+  if(act==="restore") return setOrder(d,id,{status:o.prevStatus||"ordered"});
+}
+
+/* ---------- render: report ---------- */
+function monthRows(dates,pids){
+  const y=dates[0].slice(0,4), out=[];
+  for(let m=0;m<12;m++){ const key=y+"-"+String(m+1).padStart(2,"0"); const ds=dates.filter(d=>d.startsWith(key));
+    const rows=[]; ds.forEach(d=>pids.forEach(id=>rows.push(rowOf(d,id))));
+    out.push({d:key+"-01",label:MON[m]+" "+y,t:sum(rows)}); }
+  return out;
+}
+function periodData(){
+  const rg=range(S.rMode,S.rDate), dates=datesIn(rg);
+  const pids=pidsUsed(dates).filter(id=>S.products.some(p=>p.id===id)||dates.some(d=>S.days[d]&&S.days[d].rows&&S.days[d].rows[id]));
+  return {rg,dates,pids};
+}
+function byBaker(dates,pids){
+  const g={};
+  dates.forEach(d=>{ const us=hasOrders(d)?liveOrders(d).filter(o=>pids.includes(o.pid)).map(o=>Object.assign(orderRow(o),{id:o.pid})):pids.map(id=>Object.assign(rowOf(d,id),{id}));
+    us.forEach(r=>{ const id=r.id; if(!(r.made||r.damaged||r.released||r.batches)) return;
+    const k=r.baker||""; (g[k]=g[k]||{rows:[],breads:new Set(),days:new Set()}); g[k].rows.push(r); g[k].breads.add(id); g[k].days.add(d); }); });
+  const order=S.bakers.map(b=>b.id).filter(k=>g[k]).concat(Object.keys(g).filter(k=>k&&!S.bakers.some(b=>b.id===k))).concat(g[""]?[""]:[]);
+  return order.map(k=>({id:k,name:k?bname(k):"Not set",t:sum(g[k].rows),breads:[...g[k].breads].map(pname),days:g[k].days.size}));
+}
+function yieldTxt(t){ return t.expMade? pctTxt(pct(t.madeVsExp,t.expMade)) : "–"; }
+function renderReport(){
+  const {rg,dates,pids}=periodData();
+  $("rDate").value=S.rDate; $("rMode").value=S.rMode; $("rLabel").textContent=rangeLabel(S.rMode,rg);
+  const all=[]; dates.forEach(d=>pids.forEach(id=>all.push(rowOf(d,id))));
+  const T=sum(all); tiles($("rTiles"),T,Object.assign({made:(k=>k+" day"+(k===1?"":"s")+" logged")(dates.filter(d=>pids.some(id=>{const r=rowOf(d,id);return r.made||r.damaged||r.released;})).length)},values(dates,pids)));
+  const anyPrice=pids.some(id=>pprice(id));
+  if(!pids.length){ $("rByProd").innerHTML=$("rByDay").innerHTML=$("rByBaker").innerHTML=`<div class="empty">Nothing logged for this period yet.</div>`; return; }
+  $("rByProd").innerHTML=`<table><thead><tr><th>Bread</th><th>Batches</th><th>Expected</th><th>Made</th><th>Yield</th><th>Damaged</th><th>Damage %</th><th>Released</th><th>Left</th>${anyPrice?"<th>Released value</th><th>Damage value</th>":""}</tr></thead><tbody>${
+    pids.map(id=>{ const t=sum(dates.map(d=>rowOf(d,id))); const dp=pct(t.damaged,t.made), pr=pprice(id);
+      return `<tr><td>${esc(pname(id))}${pyield(id)?`<span class="sub">${fmt(pyield(id))} per batch</span>`:""}</td><td>${fmt(t.batches)}</td><td>${t.expected?fmt(t.expected):"–"}</td><td>${fmt(t.made)}</td><td>${yieldTxt(t)}</td><td>${fmt(t.damaged)}</td><td><span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)}</span></td><td>${fmt(t.released)}</td><td class="${t.left<0?"neg":""}">${fmt(t.left)}</td>${anyPrice?`<td>${pr?peso(t.released*pr):"–"}</td><td>${pr?peso(t.damaged*pr):"–"}</td>`:""}</tr>`; }).join("")
+  }</tbody><tfoot><tr><td>Total</td><td>${fmt(T.batches)}</td><td>${T.expected?fmt(T.expected):"–"}</td><td>${fmt(T.made)}</td><td>${yieldTxt(T)}</td><td>${fmt(T.damaged)}</td><td>${pctTxt(pct(T.damaged,T.made))}</td><td>${fmt(T.released)}</td><td>${fmt(T.left)}</td>${anyPrice?`<td>${values(dates,pids).relVal}</td><td>${values(dates,pids).dmgVal}</td>`:""}</tr></tfoot></table>`;
+  const bb=byBaker(dates,pids);
+  $("rByBaker").innerHTML=bb.length?`<table><thead><tr><th>Baker</th><th>Days</th><th>Batches</th><th>Expected</th><th>Made</th><th>Yield</th><th>Damaged</th><th>Damage %</th><th style="text-align:left">Breads</th></tr></thead><tbody>${
+    bb.map(b=>{ const dp=pct(b.t.damaged,b.t.made);
+      return `<tr><td>${esc(b.name)}</td><td>${b.days}</td><td>${fmt(b.t.batches)}</td><td>${b.t.expected?fmt(b.t.expected):"–"}</td><td>${fmt(b.t.made)}</td><td>${yieldTxt(b.t)}</td><td>${fmt(b.t.damaged)}</td><td><span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)}</span></td><td style="text-align:left;white-space:normal">${esc(b.breads.join(", "))}</td></tr>`; }).join("")
+  }</tbody></table>`:`<div class="empty">Nothing logged for this period yet.</div>`;
+  const yr=S.rMode==="year";
+  $("rByDayH").hidden=$("rByDay").hidden=S.rMode==="day";
+  $("rByDayH").textContent=yr?"By month":"By day";
+  const dayRows=yr?monthRows(dates,pids):dates.map(d=>({d,label:short(d),t:sum(pids.map(id=>rowOf(d,id)))}));
+  const max=Math.max(1,...dayRows.map(x=>x.t.made));
+  $("rByDay").innerHTML=`<table><thead><tr><th>${yr?"Month":"Day"}</th><th>Made</th><th>Damaged</th><th>Damage %</th><th>Released</th><th>Left</th><th style="text-align:left">Mix</th></tr></thead><tbody>${
+    dayRows.map(({d,label,t})=>{ const w=v=>(Math.max(0,v)/max*100).toFixed(1)+"%";
+      return `<tr${t.made||t.damaged||t.released?"":' style="color:var(--muted)"'}><td><a href="#" data-goto="${d}" style="color:inherit">${label}</a></td><td>${fmt(t.made)}</td><td>${fmt(t.damaged)}</td><td>${t.made?pctTxt(pct(t.damaged,t.made)):"–"}</td><td>${fmt(t.released)}</td><td class="${t.left<0?"neg":""}">${fmt(t.left)}</td>
+      <td><div class="mini" title="Released ${t.released}, damaged ${t.damaged}, left ${t.left}"><span style="width:${w(t.released)};background:var(--rel)"></span><span style="width:${w(t.damaged)};background:var(--dmg)"></span><span style="width:${w(t.left)};background:var(--left)"></span></div></td></tr>`; }).join("")
+  }</tbody></table>`;
+}
+function exportExcel(){
+  if(!window.XLSX){ toast("Excel tool did not load. Check your connection."); return; }
+  const {rg,dates,pids}=periodData();
+  const anyPrice=pids.some(id=>pprice(id));
+  const r1=x=>Math.round(x*10)/10;
+  const yp=t=>t.expMade?r1(pct(t.madeVsExp,t.expMade)):"";
+  const head=["Bread","Yield per batch","Batches","Expected","Made","Yield %","Damaged","Damage %","Released","Left"].concat(anyPrice?["Price","Released value","Damage value"]:[]);
+  const sum1=[["Bakery production: "+rangeLabel(S.rMode,rg)],[],head];
+  pids.forEach(id=>{ const t=sum(dates.map(d=>rowOf(d,id))), pr=pprice(id);
+    sum1.push([pname(id),pyield(id)||"",t.batches,t.expected||"",t.made,yp(t),t.damaged,t.made?r1(pct(t.damaged,t.made)):0,t.released,t.left].concat(anyPrice?[pr||"",pr?t.released*pr:"",pr?t.damaged*pr:""]:[])); });
+  const all=[]; dates.forEach(d=>pids.forEach(id=>all.push(rowOf(d,id)))); const T=sum(all);
+  sum1.push(["TOTAL","",T.batches,T.expected||"",T.made,yp(T),T.damaged,T.made?r1(pct(T.damaged,T.made)):0,T.released,T.left]);
+  const daily=[["Date","Day","Bread","Baked by","Batches","Expected","Made","Damaged","Released","Left"]];
+  dates.forEach(d=>pids.forEach(id=>{ const r=rowOf(d,id); if(r.made||r.damaged||r.released||r.batches) daily.push([d,DOW[parse(d).getDay()],pname(id),r.baker?bname(r.baker):"",r.batches||"",r.expected||"",r.made,r.damaged,r.released,r.made-r.damaged-r.released]); }));
+  const bk=[["Baker","Days","Batches","Expected","Made","Yield %","Damaged","Damage %","Breads"]];
+  byBaker(dates,pids).forEach(b=>bk.push([b.name,b.days,b.t.batches,b.t.expected||"",b.t.made,yp(b.t),b.t.damaged,b.t.made?r1(pct(b.t.damaged,b.t.made)):0,b.breads.join(", ")]));
+  const wb=XLSX.utils.book_new();
+  const ws1=XLSX.utils.aoa_to_sheet(sum1); ws1["!cols"]=[{wch:24},{wch:14},{wch:9},{wch:9},{wch:9},{wch:9},{wch:9},{wch:10},{wch:9},{wch:8},{wch:9},{wch:14},{wch:14}];
+  const ws2=XLSX.utils.aoa_to_sheet(daily); ws2["!cols"]=[{wch:12},{wch:6},{wch:24},{wch:18},{wch:9},{wch:9},{wch:9},{wch:9},{wch:9},{wch:8}];
+  const ws3=XLSX.utils.aoa_to_sheet(bk); ws3["!cols"]=[{wch:20},{wch:6},{wch:9},{wch:9},{wch:9},{wch:9},{wch:9},{wch:10},{wch:40}];
+  XLSX.utils.book_append_sheet(wb,ws1,"Summary"); XLSX.utils.book_append_sheet(wb,ws3,"By baker");
+  if(S.rMode==="year"){ const mm=[["Month","Batches","Expected","Made","Yield %","Damaged","Damage %","Released","Left"]];
+    monthRows(dates,pids).forEach(({label,t})=>mm.push([label,t.batches,t.expected||"",t.made,yp(t),t.damaged,t.made?r1(pct(t.damaged,t.made)):0,t.released,t.left]));
+    const ws4=XLSX.utils.aoa_to_sheet(mm); ws4["!cols"]=[{wch:12},{wch:9},{wch:9},{wch:9},{wch:9},{wch:9},{wch:10},{wch:9},{wch:8}];
+    XLSX.utils.book_append_sheet(wb,ws4,"By month"); } XLSX.utils.book_append_sheet(wb,ws2,"Daily");
+  const po=[["Order no.","Date","Bread","Batches","Baker","Status","Expected","Counted","Passed (released)","Damaged","Damage reason","Note"]];
+  dates.forEach(d=>dayOrders(d).forEach(o=>{ const y=pyield(o.pid); po.push([poNo(d,o),d,pname(o.pid),n(o.batches),o.baker?bname(o.baker):"",o.status,n(o.batches)&&y?Math.round(n(o.batches)*y):"",o.yield===undefined?"":n(o.yield),o.status==="inspected"?n(o.passed):"",o.status==="inspected"?n(o.damaged):"",o.why||"",o.note||""]); }));
+  if(po.length>1){ const ws5=XLSX.utils.aoa_to_sheet(po); ws5["!cols"]=[{wch:16},{wch:12},{wch:22},{wch:8},{wch:18},{wch:10},{wch:9},{wch:9},{wch:16},{wch:9},{wch:20},{wch:24}]; XLSX.utils.book_append_sheet(wb,ws5,"Production orders"); }
+  const out=XLSX.write(wb,{bookType:"xlsx",type:"array"});
+  const fname="Bakery_Production_"+(S.rMode==="year"?rg[0].slice(0,4):S.rMode==="month"?rg[0].slice(0,7):rg[0]+(rg[1]!==rg[0]?"_to_"+rg[1]:""))+".xlsx";
+  claude.use("downloads").then(dl=>{
+    if(!dl){ toast("Downloads are not available in this view."); return; }
+    return dl.save({filename:fname,data:new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})}).then(()=>toast("Excel file ready")).catch(e=>{ if(e&&e.code!=="declined") toast("Could not save the file."); });
+  });
+}
+
+/* ---------- render: breads & bakers ---------- */
+function renderBreads(){
+  const L=$("pList");
+  L.innerHTML=!S.products.length?`<div class="empty">No breads yet. Add your first one below.</div>`:
+  `<div class="prod-row head"><span>Bread</span><span>Yield per batch</span><span>Price ₱</span><span class="up"></span><span class="up"></span><span></span></div>`+
+  S.products.map((p,i)=>`<div class="prod-row">
+    <input id="pn-${p.id}" value="${esc(p.name)}" data-edit="name" data-id="${p.id}" aria-label="Bread name">
+    <input id="py-${p.id}" type="number" step="1" min="0" inputmode="numeric" value="${p.yield||""}" placeholder="pcs" data-edit="yield" data-id="${p.id}" aria-label="${esc(p.name)} yield per batch">
+    <input id="pp-${p.id}" type="number" step="0.01" min="0" inputmode="decimal" value="${p.price||""}" placeholder="₱" data-edit="price" data-id="${p.id}" aria-label="${esc(p.name)} price">
+    <button class="btn up" data-move="-1" data-id="${p.id}" ${i===0?"disabled":""} aria-label="Move up">↑</button>
+    <button class="btn up" data-move="1" data-id="${p.id}" ${i===S.products.length-1?"disabled":""} aria-label="Move down">↓</button>
+    <button class="btn danger" data-del="${p.id}">${pendingConfirm===p.id?"Tap again":"Remove"}</button>
+  </div>`).join("");
+  const B=$("bList");
+  const act=S.bakers.filter(b=>!b.gone);
+  B.innerHTML=!act.length?`<div class="empty">No bakers yet. Add the people who bake below.</div>`:
+  act.map(b=>`<div class="baker-row">
+    <input id="bn-${b.id}" value="${esc(b.name)}" data-bid="${b.id}" aria-label="Baker name">
+    <button class="btn danger" data-bdel="${b.id}">${pendingConfirm===b.id?"Tap again":"Remove"}</button>
+  </div>`).join("");
+}
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ---------- render: tally ---------- */
+function ago(ms){ const m=Math.round((Date.now()-ms)/60000); if(m<1) return "just now"; if(m<60) return m+" min ago"; const h=Math.round(m/60); if(h<24) return h+" hour"+(h===1?"":"s")+" ago"; const d=Math.round(h/24); return d+" day"+(d===1?"":"s")+" ago"; }
+function chk(diff,released,out){
+  if(!released&&!out) return `<span class="chk none">Nothing</span>`;
+  if(!diff) return `<span class="chk ok">Tally</span>`;
+  return diff>0?`<span class="chk bad">Short ${fmt(diff)}</span>`:`<span class="chk bad">Over ${fmt(-diff)}</span>`;
+}
+function tallyRows(d){
+  const L=(S.links[d]&&S.links[d].items)||{}, rowsP=(S.days[d]&&S.days[d].rows)||{};
+  const ids=[...new Set(S.products.map(p=>p.id).concat(Object.keys(rowsP)).concat(Object.keys(L)))];
+  return ids.map(id=>{
+    const r=rowOf(d,id), l=L[id]||{}, branch=n(l.branch), online=n(l.online), out=branch+online;
+    const name=id.startsWith("x:")?(l.name||id.slice(2)):pname(id);
+    return {id,name,unlisted:id.startsWith("x:"),made:r.made,damaged:r.damaged,released:r.released,branch,online,out,
+      pulled:n(l.pulled),bdmg:n(l.bdmg),by:l.by||{},diff:r.released-out,left:r.made-r.damaged-out};
+  }).filter(x=>x.made||x.damaged||x.released||x.out||x.pulled||x.bdmg);
+}
+function tallyTotals(rows){ const t={made:0,damaged:0,released:0,branch:0,online:0,out:0,left:0,bad:0}; rows.forEach(x=>{["made","damaged","released","branch","online","out","left"].forEach(k=>t[k]+=x[k]); if(x.diff) t.bad++;}); t.diff=t.released-t.out; return t; }
+function renderSync(){
+  const el=$("tSync"); if(!el) return; const sy=S.sync;
+  el.innerHTML=`<div><b>Deliveries and online orders come in by themselves</b><span class="note">${sy&&sy.at?(sy.ok===false?`<span style="color:var(--dmg)">The last update did not finish (${ago(sy.at)}): ${esc(sy.msg||"")}</span>`:`Last updated ${ago(sy.at)}`):"Not updated yet"} · updates by itself within a minute</span></div>${S.canFire?`<button class="btn" id="tSyncNow">Update now</button>`:""}`;
+}
+function renderTally(){
+  const d=S.tDate; $("tDate").value=d; $("tLabel").textContent=nice(d)+(d===today()?" · today":"");
+  renderSync();
+  const rows=tallyRows(d), t=tallyTotals(rows);
+  $("tTiles").innerHTML=`
+   <div class="tile"><span class="k"><i style="background:var(--rel)"></i>Released</span><span class="v">${fmt(t.released)}</span><span class="s">passed inspection</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--made)"></i>Went out</span><span class="v">${fmt(t.out)}</span><span class="s">${fmt(t.branch)} to branches · ${fmt(t.online)} online</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--dmg)"></i>Difference</span><span class="v" style="${t.diff?"color:var(--dmg)":""}">${t.diff>0?"−"+fmt(t.diff):t.diff<0?"+"+fmt(-t.diff):"0"}</span><span class="s">${t.diff>0?"short: released but not delivered":t.diff<0?"over: delivered more than released":"released = went out"}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--left)"></i>Breads</span><span class="v">${rows.length?(rows.length-t.bad)+"/"+rows.length:"–"}</span><span class="s">${!rows.length?"nothing logged":t.bad?t.bad+" not tallying":"all tally"}</span></div>`;
+  if(!rows.length){ $("tSheet").innerHTML=`<div class="empty">Nothing made or sent out on this day yet.</div>`; }
+  else $("tSheet").innerHTML=`<table><thead><tr><th>Bread</th><th>Made</th><th>Damaged</th><th>Released</th><th>To branches</th><th>Online</th><th>Went out</th><th>Check</th><th>Left at bakery</th></tr></thead><tbody>${
+    rows.map(x=>{ const by=Object.entries(x.by).map(([b,q])=>esc(b)+" "+fmt(q)).join(" · ");
+      const extra=[x.pulled?fmt(x.pulled)+" pulled out":"",x.bdmg?fmt(x.bdmg)+" damaged at branch":""].filter(Boolean).join(", ");
+      return `<tr><td>${esc(x.name)}${x.unlisted?`<span class="sub">not in your bread list; check the name in Branch Deliveries or Online orders</span>`:""}</td>
+      <td>${fmt(x.made)}</td><td>${fmt(x.damaged)}</td><td>${fmt(x.released)}</td>
+      <td>${fmt(x.branch)}${by?`<span class="sub">${by}</span>`:""}${extra?`<span class="sub">${extra}</span>`:""}</td>
+      <td>${fmt(x.online)}</td><td>${fmt(x.out)}</td><td>${chk(x.diff,x.released,x.out)}</td><td class="${x.left<0?"neg":""}">${fmt(x.left)}</td></tr>`; }).join("")
+  }</tbody><tfoot><tr><td>Total</td><td>${fmt(t.made)}</td><td>${fmt(t.damaged)}</td><td>${fmt(t.released)}</td><td>${fmt(t.branch)}</td><td>${fmt(t.online)}</td><td>${fmt(t.out)}</td><td>${chk(t.diff,t.released,t.out)}</td><td class="${t.left<0?"neg":""}">${fmt(t.left)}</td></tr></tfoot></table>`;
+  const all=[...new Set(Object.keys(S.days).concat(Object.keys(S.links)))].filter(k=>k<=today()).sort().reverse().slice(0,14);
+  const dr=all.map(k=>{ const rs=tallyRows(k); return {k,rs,t:tallyTotals(rs)}; }).filter(x=>x.rs.length);
+  $("tDays").innerHTML=dr.length?`<table><thead><tr><th>Day</th><th>Released</th><th>Went out</th><th>Check</th><th style="text-align:left">Breads not tallying</th></tr></thead><tbody>${
+    dr.map(({k,rs,t})=>`<tr><td><a href="#" data-tgoto="${k}" style="color:inherit">${short(k)}</a></td><td>${fmt(t.released)}</td><td>${fmt(t.out)}</td><td>${chk(t.diff,t.released,t.out)}</td><td style="text-align:left;white-space:normal">${esc(rs.filter(x=>x.diff).map(x=>x.name+" ("+(x.diff>0?"short "+fmt(x.diff):"over "+fmt(-x.diff))+")").join(", "))||"–"}</td></tr>`).join("")
+  }</tbody></table>`:`<div class="empty">No days yet.</div>`;
+}
+
+function render(){
+  ["day","tally","report","breads"].forEach(t=>{ $("view-"+t).hidden=S.tab!==t; $("tab-"+t).setAttribute("aria-selected",S.tab===t); });
+  if(S.tab==="day") renderDay(); else if(S.tab==="tally") renderTally(); else if(S.tab==="report") renderReport(); else renderBreads();
+}
+
+/* ---------- events ---------- */
+const newId=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+document.querySelector("nav").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; S.tab=b.dataset.tab; try{localStorage.setItem(LS+".tab",S.tab)}catch(x){} render(); });
+$("dDate").addEventListener("change",e=>{ if(e.target.value){ S.dDate=e.target.value; renderDay(); } });
+$("dPrev").onclick=()=>{ S.dDate=addDays(S.dDate,-1); renderDay(); };
+$("dNext").onclick=()=>{ S.dDate=addDays(S.dDate,1); renderDay(); };
+$("dToday").onclick=()=>{ S.dDate=today(); renderDay(); };
+$("oList").addEventListener("click",onOrderAct);
+$("oFilter").addEventListener("click",e=>{ const c=e.target.closest("[data-f]"); if(!c) return; S.oFilter=c.dataset.f; renderDay(); });
+$("oBread").addEventListener("change",updExp); $("oBatches").addEventListener("input",updExp);
+$("oNew").addEventListener("submit",e=>{
+  e.preventDefault(); const pid=$("oBread").value, b=Math.round((Number($("oBatches").value)||0)*100)/100; if(!pid||!(b>0)) return;
+  const d=S.dDate, os=dayOrders(d), no=os.reduce((m,o)=>Math.max(m,o.no||0),0)+1, id=newId("o");
+  setOrder(d,id,{no,pid,batches:b,baker:$("oBaker").value,note:$("oNote").value.trim(),status:"ordered",at:{ordered:Date.now()}});
+  $("oNote").value=""; toast("Order "+poNo(d,{no})+" created for "+pname(pid)); });
+$("tDate").addEventListener("change",e=>{ if(e.target.value){ S.tDate=e.target.value; renderTally(); } });
+$("tPrev").onclick=()=>{ S.tDate=addDays(S.tDate,-1); renderTally(); };
+$("tNext").onclick=()=>{ S.tDate=addDays(S.tDate,1); renderTally(); };
+$("tToday").onclick=()=>{ S.tDate=today(); renderTally(); };
+$("tDays").addEventListener("click",e=>{ const a=e.target.closest("[data-tgoto]"); if(!a) return; e.preventDefault(); S.tDate=a.dataset.tgoto; renderTally(); window.scrollTo({top:0}); });
+$("tSync").addEventListener("click",async e=>{ const t=e.target.closest("#tSyncNow"); if(!t) return;
+  t.disabled=true; t.textContent="Starting…";
+  try{ const m=await claude.use("mcp"); if(!m) throw 0; await m.callTool("Claude Code Remote","fire_trigger",{trigger_id:TRIG}); toast("Update started. New figures show here in a few minutes."); t.textContent="Started"; }
+  catch(x){ toast("Could not start it from here. It still updates by itself every night."); t.disabled=false; t.textContent="Update now"; } });
+$("rMode").onchange=e=>{ S.rMode=e.target.value; renderReport(); };
+$("rDate").addEventListener("change",e=>{ if(e.target.value){ S.rDate=e.target.value; renderReport(); } });
+$("rPrev").onclick=()=>{ S.rDate=shift(S.rMode,S.rDate,-1); renderReport(); };
+$("rNext").onclick=()=>{ S.rDate=shift(S.rMode,S.rDate,1); renderReport(); };
+$("rExcel").onclick=exportExcel;
+$("rByDay").addEventListener("click",e=>{ const a=e.target.closest("[data-goto]"); if(!a) return; e.preventDefault();
+  if(S.rMode==="year"){ S.rMode="month"; S.rDate=a.dataset.goto; renderReport(); return; }
+  S.dDate=a.dataset.goto; S.tab="day"; render(); });
+$("pAdd").addEventListener("submit",e=>{
+  e.preventDefault(); const name=$("pName").value.trim(); if(!name) return;
+  S.products.push({id:newId("b"), name, yield:n($("pYield").value)||0, price:n($("pPrice").value)||0});
+  $("pName").value=""; $("pYield").value=""; $("pPrice").value=""; $("pName").focus(); renderBreads(); writeProducts(); toast("Added "+name);
+});
+$("bAdd").addEventListener("submit",e=>{
+  e.preventDefault(); const name=$("bName").value.trim(); if(!name) return;
+  S.bakers.push({id:newId("k"), name});
+  $("bName").value=""; $("bName").focus(); renderBreads(); writeProducts(); toast("Added "+name);
+});
+let editT=null;
+$("pList").addEventListener("input",e=>{
+  const el=e.target, p=S.products.find(p=>p.id===el.dataset.id); if(!p) return;
+  if(el.dataset.edit==="name") p.name=el.value; else p[el.dataset.edit]=n(el.value);
+  clearTimeout(editT); editT=setTimeout(writeProducts,700);
+});
+$("bList").addEventListener("input",e=>{
+  const el=e.target, b=S.bakers.find(b=>b.id===el.dataset.bid); if(!b) return;
+  b.name=el.value; clearTimeout(editT); editT=setTimeout(writeProducts,700);
+});
+function armConfirm(id){ pendingConfirm=id; renderBreads(); setTimeout(()=>{ if(pendingConfirm===id){ pendingConfirm=null; renderBreads(); } },4000); }
+$("pList").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.move){ const i=S.products.findIndex(p=>p.id===b.dataset.id), j=i+Number(b.dataset.move); [S.products[i],S.products[j]]=[S.products[j],S.products[i]]; renderBreads(); writeProducts(); return; }
+  if(b.dataset.del){
+    if(pendingConfirm!==b.dataset.del){ armConfirm(b.dataset.del); return; }
+    const p=S.products.find(p=>p.id===b.dataset.del); S.products=S.products.filter(x=>x.id!==b.dataset.del); pendingConfirm=null;
+    renderBreads(); writeProducts(); toast("Removed "+(p?p.name:"bread")+". Past entries stay in reports.");
+  }
+});
+$("bList").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-bdel]"); if(!b) return; const id=b.dataset.bdel;
+  if(pendingConfirm!==id){ armConfirm(id); return; }
+  const k=S.bakers.find(x=>x.id===id); if(k) k.gone=true; pendingConfirm=null;
+  renderBreads(); writeProducts(); toast("Removed "+(k?k.name:"baker")+". Past entries keep their records.");
+});
+
+/* ---------- boot ---------- */
+loadLocal();
+try{ const t=localStorage.getItem(LS+".tab"); if(t) S.tab=t; }catch(e){}
+render();
+setSync("Saved on this device");
+
+if(window.claude&&claude.use){
+  claude.use("db").then(d=>{
+    if(!d){ setSync("Saved on this device only. Sign in to keep it in your account."); return; }
+    db=d; live=true; setSync("Connecting…");
+    let first=true;
+    db.doc("bakery/log").onSnapshot(snap=>{
+      const data=snap.exists&&snap.data();
+      if(data&&Array.isArray(data.products)){ S.products=data.products.map(x=>Object.assign({},x)); S.bakers=(data.bakers||[]).map(x=>Object.assign({},x)); }
+      else if(first&&S.products.length){ writeProducts(); } // move device list up to the account
+      first=false; saveLocal();
+      if(!(document.activeElement&&document.activeElement.closest&&document.activeElement.closest("#view-breads"))) render();
+      setSync("Saved");
+    },()=>setSync("Could not reach your account. Changes are kept on this device."));
+    let firstDays=true;
+    db.collection("bakery/log/links").onSnapshot(qs=>{
+      const m={}; qs.docs.forEach(doc=>{ const v=doc.data(); if(v) m[doc.id]=v; }); S.links=m;
+      if(S.tab==="tally") renderTally();
+    },()=>{});
+    db.doc("bakery/sync").onSnapshot(snap=>{ S.sync=snap.exists?snap.data():null; if(S.tab==="tally") renderSync(); },()=>{});
+    claude.use("mcp").then(m=>{ S.canFire=!!m; if(S.tab==="tally") renderSync(); });
+    db.collection("bakery/log/days").onSnapshot(qs=>{
+      const remote={}; qs.docs.forEach(doc=>{ const v=doc.data(); if(v) remote[doc.id]={date:doc.id,rows:v.rows||{},orders:v.orders||{}}; });
+      firstDays=false; // the account is the record: days only on this device are not pushed back up
+      dirty.forEach(k=>{ if(S.days[k]) remote[k]=S.days[k]; }); // unsaved edits win
+      // keep a day the viewer is typing into
+      const typing=document.activeElement&&document.activeElement.dataset&&(document.activeElement.dataset.pid||document.activeElement.dataset.oid);
+      const keep=typing?S.days[S.dDate]:null;
+      S.days=remote; if(keep) S.days[S.dDate]=keep;
+      saveLocal();
+      if(!typing) render();
+    },()=>setSync("Could not reach your account. Changes are kept on this device."));
+  });
+}
+})();
+</script>
+
+</body></html>
