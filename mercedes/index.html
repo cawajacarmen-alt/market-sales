@@ -691,6 +691,55 @@ try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(
 // Website copy: keep the page available offline.
 try{ if("serviceWorker" in navigator&&location.protocol==="https:") navigator.serviceWorker.register("sw.js"); }catch(e){}
 setSync("Saved on this phone only");
+// Shared by the website pages and the Google Sheet script: one saved record per document.
+// A record keeps each piece of a document with the time it last changed, so two phones that
+// change different orders or receipts on the same day both keep their change.
+// rec = {u:{<unit>:{t:<ms>, v:<value>} | {t:<ms>, del:1}}}
+// Unit keys: "f" = whole field f; "f.m.<key>" = one entry of map field f; "f.a.<id>" = one item (by id) of array field f.
+function wsSplitOf(split, path) {
+  for (var i = 0; i < split.length; i++) if (new RegExp(split[i][0]).test(path)) return split[i][1];
+  return {};
+}
+function wsUnits(doc, sp) {
+  var u = {};
+  Object.keys(doc || {}).forEach(function (k) {
+    var v = doc[k];
+    if (sp[k] === 'map' && v && typeof v === 'object' && !Array.isArray(v)) Object.keys(v).forEach(function (s) { u[k + '.m.' + s] = v[s]; });
+    else if (sp[k] === 'arr' && Array.isArray(v)) v.forEach(function (x) { if (x && x.id != null) u[k + '.a.' + x.id] = x; });
+    else u[k] = v;
+  });
+  return u;
+}
+function wsAssemble(rec, sp) {
+  var d = {}, any = false;
+  Object.keys(sp).forEach(function (k) { d[k] = sp[k] === 'arr' ? [] : {}; });
+  Object.keys((rec && rec.u) || {}).forEach(function (key) {
+    var x = rec.u[key]; if (x.del) return; any = true;
+    var m = /^(.*?)\.(m|a)\.(.*)$/.exec(key);
+    if (m && sp[m[1]] === (m[2] === 'm' ? 'map' : 'arr')) { if (m[2] === 'm') d[m[1]][m[3]] = x.v; else d[m[1]].push(x.v); }
+    else d[key] = x.v;
+  });
+  return any ? d : null;
+}
+function wsMerge(a, b) {
+  var out = { u: {} }, au = (a && a.u) || {}, bu = (b && b.u) || {};
+  Object.keys(au).concat(Object.keys(bu)).forEach(function (k) {
+    var x = au[k], y = bu[k];
+    out.u[k] = !x ? y : !y ? x : (y.t > x.t || (y.t === x.t && JSON.stringify(y) > JSON.stringify(x))) ? y : x;
+  });
+  return out;
+}
+// New record after a page writes `doc` (null = deleted) over `rec`.
+function wsStamp(rec, doc, sp, now) {
+  var old = (rec && rec.u) || {}, nu = doc ? wsUnits(doc, sp) : {}, out = { u: {} };
+  Object.keys(old).forEach(function (k) { out.u[k] = old[k]; });
+  Object.keys(nu).forEach(function (k) {
+    var o = old[k];
+    if (!o || o.del || JSON.stringify(o.v) !== JSON.stringify(nu[k])) out.u[k] = { t: Math.max(now, o ? o.t + 1 : 0), v: nu[k] };
+  });
+  Object.keys(old).forEach(function (k) { if (!old[k].del && !(k in nu)) out.u[k] = { t: Math.max(now, old[k].t + 1), del: 1 }; });
+  return out;
+}
 
 /* ---------- Google Sheet sharing ----------
    Each phone keeps everything locally and also sends changed days to the owner's Google Sheet
@@ -740,7 +789,7 @@ async function shPull(){
     if(j.carry&&j.carry.date&&(!S.carry||j.carry.date>S.carry.date)){ S.carry=j.carry; changed=true; }
     shSave(); shLast=Date.now();
     if(changed){ saveLocal(); if(!typing()) render(); }
-    shStatus(""); if(shPend.size||shSetup) shFlush();
+    shStatus(""); if(shPend.size||shSetup) shFlush(); dlvPull();
   }catch(e){ shStatus("Saved on this phone · could not reach Google Sheet"); }
 }
 function renderShNote(){ const el=$("shNote"); if(!el) return; const u=sheetUrl();
@@ -758,6 +807,61 @@ $("shOff").onclick=()=>{ if(!confirm("Stop sharing with the Google Sheet on this
 window.addEventListener("online",()=>{ shFlush(); shPull(); });
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") shPull(); });
 setInterval(()=>{ if(document.visibilityState==="visible") shPull(); },60000);
+
+/* ---------- Deliveries -> Stock in ----------
+   Delivery receipts saved on the Deliveries website (same Google Sheet) post into this branch's Stock in,
+   matched by branch name. Stock in = delivered − damaged (or the branch's own received count);
+   pulled-out bread is added to Stock out. Same rules as the Claude apps' hourly sync. */
+const DLK=LS+".dlv", DLS=LS+".dlvSince";
+let dlvRecs={}; try{ dlvRecs=JSON.parse(lsGet(DLK)||"{}"); }catch(e){}
+let dlvSince=Number(lsGet(DLS))||0;
+const dnum=v=>{ const x=Number(v); return isFinite(x)&&x>0?x:0; };
+async function dlvPull(){
+  const u=sheetUrl(); if(!u||!navigator.onLine) return;
+  try{
+    const r=await fetch(u+(u.includes("?")?"&":"?")+"action=docs&app=dlv&since="+dlvSince+"&t="+Date.now()); const j=await r.json();
+    if(!j.ok||!(j.v>=3)) return;
+    Object.keys(j.docs||{}).forEach(p=>{ dlvRecs[p]=j.docs[p]; });
+    const old=addDays(today(),-45);
+    Object.keys(dlvRecs).forEach(p=>{ const m=/(\d{4}-\d{2}-\d{2})$/.exec(p); if(m&&m[1]<old) delete dlvRecs[p]; });
+    dlvSince=j.t||dlvSince; try{ localStorage.setItem(DLK,JSON.stringify(dlvRecs)); localStorage.setItem(DLS,String(dlvSince)); }catch(e){}
+    dlvApply();
+  }catch(e){}
+}
+function dlvApply(){
+  const st=wsAssemble(dlvRecs["delivery/setup"],{})||{}, me=(S.name||"").trim().toLowerCase();
+  const bids=(st.branches||[]).filter(b=>(b.name||"").trim().toLowerCase()===me).map(b=>b.id);
+  if(!me||!bids.length) return;
+  let setupCh=false;
+  (st.items||[]).filter(d=>d&&d.id&&!d.gone).forEach(d=>{ const i=S.items.find(x=>x.id===d.id);
+    if(!i){ S.items.push({id:d.id,name:d.name||"",price:dnum(d.price)}); setupCh=true; }
+    else { if((i.name||"")!==(d.name||"")&&d.name){ i.name=d.name; setupCh=true; } if(!dnum(i.price)&&dnum(d.price)){ i.price=dnum(d.price); setupCh=true; } } });
+  if(setupCh) writeSetup();
+  const price=iid=>{ const i=S.items.find(x=>x.id===iid); return i?dnum(i.price):0; };
+  let any=false;
+  Object.keys(dlvRecs).forEach(p=>{
+    const m=/^delivery\/setup\/days\/(\d{4}-\d{2}-\d{2})$/.exec(p); if(!m) return; const date=m[1];
+    const doc=wsAssemble(dlvRecs[p],{drops:"arr",ready:"arr"})||{}, want={};
+    (doc.drops||[]).forEach(dr=>{ if(!dr||dr.void||!bids.includes(dr.bid)) return;
+      Object.keys(dr.items||{}).forEach(iid=>{ const q=dr.items[iid]||{}, w=want[iid]=want[iid]||{in:0,out:0,drs:[]};
+        w.in+=dnum(q.sent)-dnum(q.damaged); w.out+=dnum(q.pulled); w.drs.push("DR-"+String(dr.no||0).padStart(5,"0")); }); });
+    Object.keys(want).forEach(iid=>{ const w=want[iid]; w.in=Math.max(0,w.in); if(!w.in&&!w.out){ delete want[iid]; return; } want[iid]={in:w.in,out:w.out,dr:[...new Set(w.drs)].sort().join(", ")}; });
+    const day=S.days[date], main=((day||{}).rows||{}).main||{};
+    const ids=new Set(Object.keys(want).concat(Object.keys(main).filter(iid=>(main[iid]||{}).dlv)));
+    if(!ids.size) return;
+    let ch=false;
+    ids.forEach(iid=>{ const nw=want[iid], cur=((((S.days[date]||{}).rows||{}).main)||{})[iid]||{}, old=cur.dlv;
+      if(JSON.stringify(old||null)===JSON.stringify(nw||null)) return;
+      const r=Object.assign({},cur), staffOut=Math.max(0,dnum(r.out)-dnum(old&&old.out));
+      if(nw){ r.in=r.rcv!==undefined&&r.rcv!==""?r.rcv:nw.in; if(staffOut||nw.out||"out" in r) r.out=staffOut+nw.out; r.dlv=nw; if(!("price" in r)) r.price=price(iid); }
+      else { ["in","dlv","rcv","rnote"].forEach(k=>delete r[k]); if(staffOut) r.out=staffOut; else delete r.out; }
+      const dd=ensureDay(date), mm=dd.rows.main=Object.assign({},dd.rows.main);
+      if(["beg","in","out","end","sold"].some(k=>k in r)) mm[iid]=r; else delete mm[iid];
+      ch=true; });
+    if(ch){ queueDay(date); any=true; }
+  });
+  if(any&&!typing()) render();
+}
 setRole(!pin());
 renderShNote(); if(sheetUrl()){ setSync("Connecting to Google Sheet…"); shPull(); }
 setInterval(()=>{ if(!M&&S.dDate!==today()){ S.dDate=today(); render(); } },60000);
