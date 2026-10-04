@@ -1,0 +1,1138 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><title>Branch Deliveries</title><meta name="theme-color" content="#1f5f99"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"></head><body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&display=swap">
+<script src="../lib/xlsx.full.min.js"></script>
+<script src="../lib/html2canvas.min.js"></script>
+<script src="../lib/jspdf.umd.min.js"></script>
+<style>
+/* Layout: one column dispatch sheet. Tabs (Deliveries / Report / Branches & items), branch picker, tally tiles, then the item sheet. */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --line:#d9dfe5; --ink:#17212b; --muted:#5f6b77;
+  --accent:#1f5f99; --accent-ink:#ffffff; --accent-soft:#dde9f5;
+  --sent:#1f5f99; --pull:#c27a12; --dmg:#b8352b; --net:#2c7a55;
+  --dmg-soft:#f6dedb; --ok-soft:#d9eee3; --pull-soft:#f6e9d3;
+  --display:"Archivo","Segoe UI",system-ui,sans-serif;
+  --body:"Public Sans","Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11161b; --surface:#19212a; --line:#2b3641; --ink:#e6ebf0; --muted:#97a3ae;
+  --accent:#6fa8e0; --accent-ink:#0b1622; --accent-soft:#1d3247;
+  --sent:#6fa8e0; --pull:#e3a44a; --dmg:#ee7d70; --net:#6cc69a;
+  --dmg-soft:#43231f; --ok-soft:#1b3a2b; --pull-soft:#3b2d16; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161b; --surface:#19212a; --line:#2b3641; --ink:#e6ebf0; --muted:#97a3ae;
+  --accent:#6fa8e0; --accent-ink:#0b1622; --accent-soft:#1d3247;
+  --sent:#6fa8e0; --pull:#e3a44a; --dmg:#ee7d70; --net:#6cc69a;
+  --dmg-soft:#43231f; --ok-soft:#1b3a2b; --pull-soft:#3b2d16; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:900px;margin:0 auto;padding-inline:16px;padding-block:20px 48px;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--display);font-weight:800;font-size:1.9rem;line-height:1.1;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h1 small{display:block;font-family:var(--body);font-size:.78rem;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
+h2{font-family:var(--display);font-weight:700;font-size:1.15rem;margin:0}
+.sync{font-size:.8rem;color:var(--muted)}
+nav{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px;width:fit-content;max-width:100%;overflow-x:auto}
+nav button{border:0;background:transparent;color:var(--muted);font:600 .95rem var(--body);padding:8px 14px;border-radius:7px;cursor:pointer;white-space:nowrap}
+nav button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 .9rem var(--body);padding:8px 12px;border-radius:8px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{color:var(--dmg)}
+.btn:disabled{opacity:.5;cursor:default}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+body.staff .ownerOnly{display:none!important}
+.datelabel{font-family:var(--display);font-weight:700;font-size:1.05rem;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 .88rem var(--body);padding:7px 12px;border-radius:99px;cursor:pointer;display:flex;gap:6px;align-items:center}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--net)}
+.chip[aria-pressed="true"] .dot{background:var(--accent-ink)}
+.route{display:flex;align-items:center;gap:8px;font-size:.88rem;color:var(--muted);flex-wrap:wrap}
+.route b{color:var(--ink);font-weight:600}
+.route .arrow{flex:0 0 auto;width:34px;height:2px;background:var(--line);position:relative}
+.route .arrow::after{content:"";position:absolute;right:-1px;top:-4px;border:5px solid transparent;border-left-color:var(--line);border-right:0}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile .k{font-size:.72rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
+.tile .k i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.tile .v{font-family:var(--display);font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+.tile .s{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal;min-width:120px}
+thead th{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg)}
+tfoot td{font-weight:700;border-bottom:0;background:var(--bg)}
+tbody tr:last-child td{border-bottom:0}
+td input{width:80px;text-align:right;padding:6px 8px;font-variant-numeric:tabular-nums}
+td.neg{color:var(--dmg);font-weight:600}
+td a{color:inherit}
+.pill{display:inline-block;font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:99px}
+.pill.hi{background:var(--dmg-soft);color:var(--dmg)}
+.pill.mid{background:var(--pull-soft);color:var(--pull)}
+.pill.lo{background:var(--ok-soft);color:var(--net)}
+.mini{display:flex;height:8px;border-radius:3px;overflow:hidden;background:var(--bg);min-width:90px}
+.mini span{display:block;height:100%}
+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
+.note{font-size:.82rem;color:var(--muted);margin:0}
+.trip{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.trip label{display:flex;flex-direction:column;gap:4px;font-size:.78rem;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;min-width:0}
+.trip input{text-transform:none;letter-spacing:0;font-weight:400;min-width:0}
+.list-row{display:grid;grid-template-columns:1fr 110px auto auto auto;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+.list-row.b{grid-template-columns:1fr auto auto auto}
+.list-row.head{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg);padding-block:6px}
+.list-row:last-child{border-bottom:0}
+.list-row input{width:100%;min-width:0}
+.add{display:grid;grid-template-columns:1fr 110px auto;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--bg)}
+.add.two{grid-template-columns:1fr auto}
+.add input{min-width:0}
+.mainrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mainrow input{flex:1 1 220px;min-width:0}
+#dReady{display:none}
+#tripForm th:nth-child(3),#tripForm td:nth-child(3){display:none}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.9rem;z-index:5}
+.sample{font-size:.75rem;font-weight:600;color:var(--pull);background:var(--pull-soft);padding:2px 8px;border-radius:99px}
+/* Delivery slip: always light and fixed width, so the saved PDF looks the same from any phone. */
+.slip{width:760px;background:#fff;color:#1a1a1a;font-family:var(--body);font-size:14px;line-height:1.4;padding:30px 34px}
+.slip .top{display:flex;justify-content:space-between;gap:16px;border-bottom:3px solid #1f5f99;padding-bottom:12px}
+.slip .top b{display:block;font-family:var(--display);font-size:22px;line-height:1.15}
+.slip .top .t{font-family:var(--display);font-size:17px;font-weight:800;letter-spacing:.06em;color:#1f5f99;text-transform:uppercase;text-align:right}
+.slip .top .n{font-size:13px;text-align:right;color:#444}
+.slip .flds{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin-top:14px}
+.slip .fld{display:flex;gap:8px;align-items:baseline}
+.slip .fld .k{flex:none;font-size:12px;color:#555;min-width:70px}
+.slip .fld .v{flex:1;border-bottom:1px solid #999;padding-bottom:2px;font-weight:600;min-height:20px}
+.slip table{margin-top:16px;font-size:13px}
+.slip th,.slip td{padding:6px 8px;border:1px solid #cfcfcf;color:#1a1a1a;background:#fff}
+.slip thead th{background:#eef2f6;color:#333;font-size:11px}
+.slip tfoot td{font-weight:700;font-size:14px;background:#f6f6f6}
+.slip .note2{margin-top:10px;font-size:12.5px;color:#333}
+.slip .sig{display:flex;justify-content:space-between;gap:28px;margin-top:44px}
+.slip .sig div{flex:1;text-align:center;font-size:12px;color:#555;border-top:1px solid #1a1a1a;padding-top:4px}
+.slip .sig div b{display:block;color:#1a1a1a;font-size:13px;margin-top:-26px;margin-bottom:10px;min-height:18px}
+.slip .foot{margin-top:18px;font-size:10.5px;color:#777;text-align:center}
+#cap{position:fixed;left:-10000px;top:0}
+.printbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lots{display:flex;flex-direction:column;gap:6px}
+.lot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:.88rem;padding:8px 10px;border:1px dashed var(--line);border-radius:8px}
+.lot>span:first-child{min-width:0;flex:1 1 220px}
+.card.ready{border-color:var(--net)}
+.avail{display:block;font-size:.74rem;font-weight:600}
+.avail.ok{color:var(--net)} .avail.bad{color:var(--dmg)}
+.warnbox{padding:9px 12px;border-radius:8px;background:var(--dmg-soft);color:var(--dmg);font-weight:600;font-size:.88rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px}
+h3{font-family:var(--display);font-weight:700;font-size:1.05rem;margin:0}
+.btn.sm{padding:5px 10px;font-size:.84rem}
+.sub{display:block;font-size:.74rem;color:var(--muted);font-weight:400}
+.cnt{display:inline-block;min-width:20px;padding:0 6px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-size:.75rem;line-height:1.5}
+.chip[aria-pressed="true"] .cnt{background:var(--accent-ink);color:var(--accent)}
+tr.void td{color:var(--muted)}
+tr.void td a{text-decoration:line-through}
+.preview{overflow:hidden;border-radius:10px;border:1px solid var(--line);background:var(--bg);padding:12px}
+/* Delivery receipt: purchase-receipt style, always light. */
+.rc{width:640px;margin:0 auto;background:#fff;color:#1a1a1a;font-family:var(--body);font-size:14px;line-height:1.4;padding:26px 30px;border:1px solid #d9d9d9;position:relative}
+.rc .top{display:flex;justify-content:space-between;gap:16px;border-bottom:3px solid #1f5f99;padding-bottom:12px}
+.rc .biz b{display:block;font-family:var(--display);font-size:21px;line-height:1.15}
+.rc .biz span{display:block;font-size:12px;color:#555}
+.rc .no{text-align:right;flex:none}
+.rc .no .t{font-family:var(--display);font-size:16px;font-weight:800;letter-spacing:.05em;color:#1f5f99;text-transform:uppercase}
+.rc .no .n{font-family:var(--display);font-size:20px;font-weight:800;color:#b8352b;font-variant-numeric:tabular-nums}
+.rc .no .d{font-size:12.5px}
+.rc .flds{display:grid;grid-template-columns:1fr 1fr;gap:8px 22px;margin-top:12px}
+.rc .fld{display:flex;gap:8px;align-items:baseline}
+.rc .fld .k{flex:none;font-size:12px;color:#555;min-width:78px}
+.rc .fld .v{flex:1;border-bottom:1px solid #999;padding-bottom:2px;font-weight:600;min-height:20px}
+.rc table{margin-top:14px;font-size:13px}
+.rc th,.rc td{padding:5px 8px;border-bottom:1px solid #ddd;color:#1a1a1a;background:#fff}
+.rc thead th{background:#eef2f6;color:#333;font-size:11px}
+.rc th.l,.rc td.l{text-align:left}
+.rc th:first-child,.rc td:first-child{min-width:0}
+.rc .tot td{font-weight:700;font-size:14.5px;border-top:2px solid #1a1a1a;border-bottom:0}
+.rc .sec{margin-top:14px;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#555}
+.rc .sec+table{margin-top:4px}
+.rc .note2{margin-top:10px;font-size:12.5px;color:#333}
+.rc .sig{display:flex;justify-content:space-between;gap:24px;margin-top:40px}
+.rc .sig div{flex:1;text-align:center;font-size:11.5px;color:#555;border-top:1px solid #1a1a1a;padding-top:4px}
+.rc .sig div b{display:block;color:#1a1a1a;font-size:13px;margin-top:-24px;margin-bottom:8px;min-height:18px}
+.rc .foot{margin-top:14px;font-size:10.5px;color:#777;text-align:center}
+.rc .stamp{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) rotate(-18deg);border:5px solid #b8352b;color:#b8352b;font-family:var(--display);font-size:60px;font-weight:800;padding:2px 24px;opacity:.5;letter-spacing:.1em}
+@media (max-width:620px){
+  .tiles{grid-template-columns:repeat(2,1fr)}
+  h1{font-size:1.55rem}
+  .trip{grid-template-columns:1fr}
+  .list-row{grid-template-columns:1fr 90px auto}
+  .list-row .up{display:none}
+  .list-row.b{grid-template-columns:1fr auto}
+  .add{grid-template-columns:1fr 90px auto}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><small>Main store to branches</small>Branch Deliveries</h1>
+    <span class="sync" id="sync">Loading…</span>
+  </header>
+
+  <nav role="tablist">
+    <button id="tab-day" role="tab" aria-selected="true" data-tab="day">Deliveries</button>
+    <button id="tab-report" class="ownerOnly" role="tab" aria-selected="false" data-tab="report">Report</button>
+    <button id="tab-setup" class="ownerOnly" role="tab" aria-selected="false" data-tab="setup">Branches &amp; items</button>
+  </nav>
+
+  <!-- DELIVERIES -->
+  <section id="view-day" style="display:flex;flex-direction:column;gap:14px">
+    <div class="bar">
+      <button class="btn ownerOnly" id="dPrev" aria-label="Previous day">‹</button>
+      <input type="date" class="ownerOnly" id="dDate" aria-label="Date">
+      <button class="btn ownerOnly" id="dNext" aria-label="Next day">›</button>
+      <button class="btn ownerOnly" id="dToday">Today</button>
+      <span class="datelabel" id="dLabel"></span>
+    </div>
+    <div id="dReady"></div>
+    <h2>Deliveries by branch</h2>
+    <div class="chips" id="dBranches" role="group" aria-label="Branch"></div>
+    <div id="dBody" style="display:flex;flex-direction:column;gap:14px"></div>
+    <div class="bar" style="justify-content:space-between"><h2>This day, all branches</h2><span class="bar"><button class="btn" id="slipAll">Day summaries PDF</button><button class="btn" id="recsAll">All receipts PDF</button></span></div>
+    <div class="sheet" id="dAll"></div>
+    <p class="note">Delivered = sent from the main store. Pulled out = returned to the main store. Damaged = spoiled or broken at the branch. Net = Delivered − Pulled out − Damaged. Amount carried = Delivered × Price. Production issues a delivery receipt for every trip, each with its own number (DR-00001, DR-00002…). A wrong receipt can be voided: it stays on the list but is not counted. Changing a price on a new delivery also sets it for later deliveries; saved receipts keep their price.</p>
+  </section>
+
+  <!-- REPORT -->
+  <section id="view-report" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="bar">
+      <select id="rMode" aria-label="Report period">
+        <option value="day">Daily</option>
+        <option value="week">Weekly (Mon–Sun)</option>
+        <option value="month" selected>Monthly</option>
+        <option value="year">Yearly</option>
+      </select>
+      <button class="btn" id="rPrev" aria-label="Previous">‹</button>
+      <input type="date" id="rDate" aria-label="Report date">
+      <button class="btn" id="rNext" aria-label="Next">›</button>
+      <span class="datelabel" id="rLabel"></span>
+    </div>
+    <div class="bar">
+      <select id="rBranch" aria-label="Branch filter"></select>
+      <button class="btn primary" id="rExcel" style="margin-left:auto">Download Excel</button>
+    </div>
+    <div class="tiles" id="rTiles"></div>
+    <h2 id="rByBranchH">By branch</h2>
+    <div class="sheet" id="rByBranch"></div>
+    <h2>By item</h2>
+    <div class="sheet" id="rByItem"></div>
+    <h2 id="rByDayH">By day</h2>
+    <div class="sheet" id="rByDay"></div>
+  </section>
+
+  <!-- SETUP -->
+  <section id="view-setup" hidden style="display:flex;flex-direction:column;gap:14px">
+    <h2>Main store</h2>
+    <div class="mainrow"><input id="mainName" aria-label="Main store name" placeholder="Main store"></div>
+    <h2>Branches</h2>
+    <p class="note">The stores you deliver to. Removing a branch hides it from new deliveries; its past deliveries stay in reports.</p>
+    <div class="sheet">
+      <div id="bList"></div>
+      <form class="add two" id="bAdd">
+        <input id="bName" placeholder="Branch name, e.g. Downtown" aria-label="Branch name" required>
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+    </div>
+    <h2>Items</h2>
+    <p class="note">What you send to branches. Price is optional; when set, the report shows the peso value delivered, pulled out and damaged.</p>
+    <div class="sheet">
+      <div id="iList"></div>
+      <form class="add" id="iAdd">
+        <input id="iName" placeholder="Item name, e.g. Pandesal" aria-label="Item name" required>
+        <input id="iPrice" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Price ₱" aria-label="Price">
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+    </div>
+  </section>
+</div>
+<div id="cap"></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>window.WS_CFG={"app": "dlv", "name": "Branch Deliveries", "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]], "seed": {"delivery/setup": {"branches": [{"id": "brmurglkm530i", "name": "Market"}, {"id": "brmurgp8nbgdy", "name": "Mabuhay"}, {"id": "brmuscoi5ju23", "name": "Lugay"}, {"id": "brmuscomr3hcq", "name": "Mercedes"}, {"id": "brmuscos5tw7m", "name": "Main Branch"}], "items": [{"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 5}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}, {"id": "itmurgnpei489", "name": "Malunggay Pandesal", "price": 0}, {"id": "itmuscdyn74nm", "name": "Buko Pie", "price": 180}], "main": "Main store"}}};
+// Shared by the website pages and the Google Sheet script: one saved record per document.
+// A record keeps each piece of a document with the time it last changed, so two phones that
+// change different orders or receipts on the same day both keep their change.
+// rec = {u:{<unit>:{t:<ms>, v:<value>} | {t:<ms>, del:1}}}
+// Unit keys: "f" = whole field f; "f.m.<key>" = one entry of map field f; "f.a.<id>" = one item (by id) of array field f.
+function wsSplitOf(split, path) {
+  for (var i = 0; i < split.length; i++) if (new RegExp(split[i][0]).test(path)) return split[i][1];
+  return {};
+}
+function wsUnits(doc, sp) {
+  var u = {};
+  Object.keys(doc || {}).forEach(function (k) {
+    var v = doc[k];
+    if (sp[k] === 'map' && v && typeof v === 'object' && !Array.isArray(v)) Object.keys(v).forEach(function (s) { u[k + '.m.' + s] = v[s]; });
+    else if (sp[k] === 'arr' && Array.isArray(v)) v.forEach(function (x) { if (x && x.id != null) u[k + '.a.' + x.id] = x; });
+    else u[k] = v;
+  });
+  return u;
+}
+function wsAssemble(rec, sp) {
+  var d = {}, any = false;
+  Object.keys(sp).forEach(function (k) { d[k] = sp[k] === 'arr' ? [] : {}; });
+  Object.keys((rec && rec.u) || {}).forEach(function (key) {
+    var x = rec.u[key]; if (x.del) return; any = true;
+    var m = /^(.*?)\.(m|a)\.(.*)$/.exec(key);
+    if (m && sp[m[1]] === (m[2] === 'm' ? 'map' : 'arr')) { if (m[2] === 'm') d[m[1]][m[3]] = x.v; else d[m[1]].push(x.v); }
+    else d[key] = x.v;
+  });
+  return any ? d : null;
+}
+function wsMerge(a, b) {
+  var out = { u: {} }, au = (a && a.u) || {}, bu = (b && b.u) || {};
+  Object.keys(au).concat(Object.keys(bu)).forEach(function (k) {
+    var x = au[k], y = bu[k];
+    out.u[k] = !x ? y : !y ? x : (y.t > x.t || (y.t === x.t && JSON.stringify(y) > JSON.stringify(x))) ? y : x;
+  });
+  return out;
+}
+// New record after a page writes `doc` (null = deleted) over `rec`.
+function wsStamp(rec, doc, sp, now) {
+  var old = (rec && rec.u) || {}, nu = doc ? wsUnits(doc, sp) : {}, out = { u: {} };
+  Object.keys(old).forEach(function (k) { out.u[k] = old[k]; });
+  Object.keys(nu).forEach(function (k) {
+    var o = old[k];
+    if (!o || o.del || JSON.stringify(o.v) !== JSON.stringify(nu[k])) out.u[k] = { t: Math.max(now, o ? o.t + 1 : 0), v: nu[k] };
+  });
+  Object.keys(old).forEach(function (k) { if (!old[k].del && !(k in nu)) out.u[k] = { t: Math.max(now, old[k].t + 1), del: 1 }; });
+  return out;
+}
+
+/* Website copy: stands in for the Claude account features the app was written for.
+   - db: documents saved in this browser, and shared through the owner's Google Sheet when connected
+   - user: manager (owner) after unlocking with the PIN, staff otherwise
+   - downloads: a normal browser download
+   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script. */
+(function () {
+  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); };
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  var clone = function (x) { return x == null ? x : JSON.parse(JSON.stringify(x)); };
+  var sp = function (p) { return wsSplitOf(C.split, p); };
+
+  /* ---------- local store ---------- */
+  var recs = lsGet(LS + '.docs', {}), pend = lsGet(LS + '.pending', {}), sheet = lsGet(LS + '.sheet', ''), since = lsGet(LS + '.since', 0);
+  Object.keys(C.seed || {}).forEach(function (p) { if (!recs[p]) recs[p] = wsStamp(null, C.seed[p], sp(p), 1); });
+  var cache = {};
+  function docOf(p) { if (!(p in cache)) cache[p] = wsAssemble(recs[p], sp(p)); return cache[p]; }
+  function saveAll() { if (!lsSet(LS + '.docs', recs)) status('Could not save. This phone may be out of space.'); lsSet(LS + '.pending', pend); }
+  saveAll();
+  var parent = function (p) { return p.slice(0, p.lastIndexOf('/')); };
+
+  /* ---------- listeners ---------- */
+  var subs = [];
+  function snapDoc(p) { var d = docOf(p); return { id: p.slice(p.lastIndexOf('/') + 1), exists: !!d, data: function () { return clone(d) || undefined; } }; }
+  function runQuery(q) {
+    var out = [];
+    Object.keys(recs).forEach(function (p) {
+      if (parent(p) !== q.coll) return; var d = docOf(p); if (!d) return;
+      for (var i = 0; i < q.where.length; i++) { var w = q.where[i], a = d[w[0]], b = w[2], op = w[1];
+        if (!(op === '==' ? a === b : op === '>=' ? a >= b : op === '<=' ? a <= b : op === '<' ? a < b : op === '>' ? a > b : op === '!=' ? a !== b : false)) return; }
+      out.push(snapDoc(p));
+    });
+    out.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+    return { docs: out, size: out.length, empty: !out.length, forEach: function (f) { out.forEach(f); } };
+  }
+  function changed(paths) {
+    paths.forEach(function (p) { delete cache[p]; });
+    setTimeout(function () {
+      subs.slice().forEach(function (s) {
+        if (s.doc ? paths.indexOf(s.doc) >= 0 : paths.some(function (p) { return parent(p) === s.q.coll; }))
+          try { s.fn(s.doc ? snapDoc(s.doc) : runQuery(s.q)); } catch (e) { console.error(e); }
+      });
+    }, 0);
+  }
+  function write(p, doc) {
+    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush();
+    return Promise.resolve();
+  }
+  function merge(a, b) {
+    for (var k in b) { var v = b[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { if (!a[k] || typeof a[k] !== 'object' || Array.isArray(a[k])) a[k] = {}; merge(a[k], v); }
+      else if (v === undefined) delete a[k]; else a[k] = v; }
+    return a;
+  }
+  function DocRef(p) {
+    return {
+      id: p.slice(p.lastIndexOf('/') + 1), path: p,
+      get: function () { return Promise.resolve(snapDoc(p)); },
+      set: function (d, o) { return write(p, o && o.merge ? merge(clone(docOf(p)) || {}, clone(d)) : clone(d)); },
+      update: function (d) { if (!docOf(p)) return Promise.reject({ code: 'not_found', message: 'Not found' }); return write(p, merge(clone(docOf(p)), clone(d))); },
+      delete: function () { return write(p, null); },
+      onSnapshot: function (fn) { var s = { doc: p, fn: fn }; subs.push(s); setTimeout(function () { fn(snapDoc(p)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; },
+      collection: function (c) { return Coll(p + '/' + c); }
+    };
+  }
+  function Coll(c, where) {
+    var q = { coll: c, where: where || [] };
+    return {
+      doc: function (id) { return DocRef(c + '/' + (id || 'd' + now().toString(36) + Math.random().toString(36).slice(2, 6))); },
+      add: function (d) { var r = DocRef(c + '/d' + now().toString(36) + Math.random().toString(36).slice(2, 6)); return r.set(d).then(function () { return r; }); },
+      where: function (f, op, v) { return Coll(c, q.where.concat([[f, op, v]])); },
+      orderBy: function () { return Coll(c, q.where); }, limit: function () { return Coll(c, q.where); },
+      get: function () { return Promise.resolve(runQuery(q)); },
+      onSnapshot: function (fn) { var s = { q: q, fn: fn }; subs.push(s); setTimeout(function () { fn(runQuery(q)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; }
+    };
+  }
+  var DB = { doc: DocRef, collection: function (c) { return Coll(c); } };
+
+  /* ---------- manager PIN ---------- */
+  var PIN = LS + '.pin', UNL = LS + '.unlocked';
+  var pin = function () { return lsGet(PIN, ''); };
+  var unlocked = function () { try { return sessionStorage.getItem(UNL) === '1'; } catch (e) { return false; } };
+  var isMgr = function () { return !pin() || unlocked(); };
+  var USER = { isOwner: function () { return Promise.resolve(isMgr()); }, canEdit: function () { return Promise.resolve(isMgr()); },
+    id: function () { return Promise.resolve(isMgr() ? 'owner' : 'staff'); }, name: function () { return Promise.resolve(isMgr() ? 'Manager' : 'Staff'); } };
+
+  /* ---------- downloads ---------- */
+  var DL = { save: function (o) {
+    var a = document.createElement('a'), u = URL.createObjectURL(o.data instanceof Blob ? o.data : new Blob([o.data]));
+    a.href = u; a.download = o.filename || 'file'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+    return Promise.resolve(); } };
+
+  window.claude = { use: function (n) { return Promise.resolve(n === 'db' ? DB : n === 'user' ? USER : n === 'downloads' ? DL : null); } };
+
+  /* ---------- Google Sheet sharing ---------- */
+  var pushT = null, busy = false, lastOk = 0, err = '';
+  function queuePush() { if (!sheet) return; clearTimeout(pushT); pushT = setTimeout(push, 1200); }
+  function api(params) { return sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + params + '&app=' + C.app + '&t=' + now(); }
+  function push() {
+    var ps = Object.keys(pend); if (!sheet || busy || !ps.length) return;
+    if (!navigator.onLine) { status(''); return; }
+    busy = true; var body = { action: 'docs', app: C.app, docs: {} }; ps.forEach(function (p) { body.docs[p] = recs[p]; });
+    fetch(sheet, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.ok || !(j.v >= 3)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
+      .catch(function (e) { err = e && e.message === 'old' ? 'the Google Sheet script needs updating' : 'could not send to Google Sheet yet'; setTimeout(push, 30000); })
+      .then(function () { busy = false; status(''); if (Object.keys(pend).length && !err) setTimeout(push, 500); });
+  }
+  function pull() {
+    if (!sheet || !navigator.onLine) return Promise.resolve();
+    return fetch(api('action=docs&since=' + since)).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw 0; if (!(j.v >= 3)) { err = 'the Google Sheet script needs updating'; status(''); return; }
+      var ch = [];
+      Object.keys(j.docs || {}).forEach(function (p) { var m = wsMerge(recs[p], j.docs[p]);
+        if (JSON.stringify(m) !== JSON.stringify(recs[p])) { recs[p] = m; ch.push(p); if (JSON.stringify(m) !== JSON.stringify(j.docs[p])) pend[p] = 1; } });
+      since = j.t || since; lsSet(LS + '.since', since); saveAll(); lastOk = now(); err = '';
+      if (ch.length) changed(ch);
+      if (Object.keys(pend).length) push();
+      status('');
+    }).catch(function () { err = 'could not reach Google Sheet'; status(''); });
+  }
+  // Tapping anything fetches the latest first (at most every 2 s), so a new order or receipt number counts the other phones' entries.
+  var lastTap = 0;
+  var tap = function () { if (now() - lastTap > 2000) { lastTap = now(); pull(); } };
+  document.addEventListener('pointerdown', tap, true); document.addEventListener('keydown', tap, true);
+  window.addEventListener('online', function () { push(); pull(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') pull(); });
+  setInterval(function () { if (document.visibilityState === 'visible') pull(); }, 30000);
+
+  /* ---------- bar + panel ---------- */
+  var css = '#wsbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:6px 16px;font:500 13px system-ui,sans-serif;background:#1f2a24;color:#e8efe9}' +
+    '#wsbar button{font:600 13px system-ui,sans-serif;border:1px solid #6d8b77;background:transparent;color:#e8efe9;border-radius:6px;padding:4px 10px;cursor:pointer}' +
+    '#wspanel{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px}' +
+    '#wspanel>div{background:#fff;color:#1a1a1a;border-radius:12px;padding:16px;max-width:460px;width:100%;display:grid;gap:10px;font:15px system-ui,sans-serif;max-height:100%;overflow:auto}' +
+    '#wspanel h3{margin:4px 0 0;font-size:16px}#wspanel p{margin:0;font-size:13px;color:#555}#wspanel .r{display:flex;gap:8px;flex-wrap:wrap}' +
+    '#wspanel input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid #bbb;border-radius:8px;color:#1a1a1a;background:#fff}' +
+    '#wspanel button{font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:8px;border:1px solid #bbb;background:#fff;color:#1a1a1a;cursor:pointer}#wspanel button.p{background:#2f6b3a;border-color:#2f6b3a;color:#fff}';
+  function el(h) { var d = document.createElement('div'); d.innerHTML = h; return d.firstChild; }
+  var bar;
+  function status() {
+    if (!bar) return; var s = bar.querySelector('#wsst');
+    var n = Object.keys(pend).length;
+    s.textContent = !sheet ? 'Saved on this phone only' : err ? 'Saved on this phone · ' + err : n ? (navigator.onLine ? 'Saved on this phone · sending to Google Sheet…' : 'Saved on this phone · will send when online') : 'Shared with Google Sheet' + (lastOk ? ' ' + new Date(lastOk).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  }
+  function toast(t) { var x = document.getElementById('wstoast'); if (!x) { x = el('<div id="wstoast" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:9px 16px;border-radius:8px;font:14px system-ui;z-index:60"></div>'); document.body.appendChild(x); } x.textContent = t; x.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(function () { x.hidden = true; }, 2600); }
+  function panel() {
+    var mgr = isMgr(), p = el('<div id="wspanel"><div>' +
+      (mgr ? '' : '<h3>Manager PIN</h3><div class="r"><input id="wspin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN"><button class="p" id="wsgo">Unlock</button></div>') +
+      (mgr ? '<h3>Manager PIN</h3><p>' + (pin() ? 'A PIN is set. Staff see only today until someone unlocks with it. Type a new one to change it.' : 'No PIN yet, so anyone with this page can see past days and reports. Set a PIN only you know.') + '</p><div class="r"><input id="wsnew" type="password" inputmode="numeric" autocomplete="off" placeholder="New PIN"><button class="p" id="wsset">Save PIN</button></div>' +
+        '<h3>Google Sheet</h3><p>' + (sheet ? 'Connected. Entries are shared with your Google Sheet and every phone or computer connected to it.' : 'Not connected. Entries stay only on this phone. Paste the Web app URL from your Google Sheet to share them.') + '</p>' +
+        '<div class="r"><input id="wsurl" placeholder="https://script.google.com/macros/s/…/exec" value="' + (sheet || '').replace(/"/g, '') + '"><button class="p" id="wscon">Connect</button></div>' + (sheet ? '<div class="r"><button id="wsoff">Disconnect this phone</button></div>' : '') : '') +
+      '<div class="r" style="justify-content:flex-end">' + (mgr && pin() ? '<button id="wslock">Lock (staff view)</button>' : '') + '<button id="wsx">Close</button></div></div></div>');
+    document.body.appendChild(p);
+    var q = function (s) { return p.querySelector(s); }, close = function () { p.remove(); };
+    q('#wsx').onclick = close; p.onclick = function (e) { if (e.target === p) close(); };
+    if (q('#wsgo')) { var go = function () { if (q('#wspin').value === pin()) { try { sessionStorage.setItem(UNL, '1'); } catch (e) {} location.reload(); } else toast('Wrong PIN'); };
+      q('#wsgo').onclick = go; q('#wspin').onkeydown = function (e) { if (e.key === 'Enter') go(); }; q('#wspin').focus(); }
+    if (q('#wsset')) q('#wsset').onclick = function () { var v = q('#wsnew').value.trim(); if (v.length < 4) { toast('Use at least 4 digits.'); return; } lsSet(PIN, v); try { sessionStorage.setItem(UNL, '1'); } catch (e) {} toast('PIN saved. Tap Lock before handing the phone to staff.'); close(); render(); };
+    if (q('#wslock')) q('#wslock').onclick = function () { try { sessionStorage.removeItem(UNL); } catch (e) {} location.reload(); };
+    if (q('#wsoff')) q('#wsoff').onclick = function () { if (!confirm('Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.')) return; sheet = ''; lsSet(LS + '.sheet', null); close(); status(); };
+    if (q('#wscon')) q('#wscon').onclick = function () {
+      var v = q('#wsurl').value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { toast('Paste the Web app URL. It starts with https://script.google.com/macros/s/ and ends with /exec'); return; }
+      toast('Connecting…');
+      fetch(v + '?action=ping&t=' + now()).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ok) throw 0; if (!(j.v >= 3)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
+        sheet = v; lsSet(LS + '.sheet', v); since = 0; lsSet(LS + '.since', 0); Object.keys(recs).forEach(function (p) { pend[p] = 1; }); saveAll();
+        toast('Connected to Google Sheet'); close(); pull().then(push);
+      }).catch(function () { toast('Could not reach that Sheet. Check the link and that access is set to Anyone.'); });
+    };
+  }
+  function render() {
+    if (!bar) { bar = el('<div id="wsbar"><span><b id="wswho"></b> · <span id="wsst"></span></span><button id="wsbtn"></button></div>');
+      document.body.insertBefore(bar, document.body.firstChild); bar.querySelector('#wsbtn').onclick = panel;
+      var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); }
+    bar.querySelector('#wswho').textContent = isMgr() ? 'Manager' : 'Staff';
+    bar.querySelector('#wsbtn').textContent = isMgr() ? 'PIN & Google Sheet' : 'Manager';
+    status();
+  }
+  function boot() { render(); if (sheet) pull().then(push); }
+  if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  try { if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js'); } catch (e) {}
+})();
+</script>
+<script>
+(function(){
+const LS="branchdeliv.v1";
+const $=id=>document.getElementById(id);
+const S={prod:{},sync:null,main:"Main store",items:[],branches:[],days:{},tab:"day",dDate:today(),dBranch:"",rDate:today(),rMode:"month",rBranch:""};
+let db=null, live=false, pendingConfirm=null;
+
+/* ---------- dates ---------- */
+function today(){ return iso(new Date()); }
+function iso(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function parse(s){ const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); }
+function addDays(s,n){ const d=parse(s); d.setDate(d.getDate()+n); return iso(d); }
+const DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+function nice(s){ const d=parse(s); return DOW[d.getDay()]+", "+MON[d.getMonth()]+" "+d.getDate()+", "+d.getFullYear(); }
+function short(s){ const d=parse(s); return DOW[d.getDay()]+" "+MON[d.getMonth()]+" "+d.getDate(); }
+function range(mode,s){
+  const d=parse(s);
+  if(mode==="day") return [s,s];
+  if(mode==="week"){ const a=addDays(s,-((d.getDay()+6)%7)); return [a,addDays(a,6)]; }
+  if(mode==="year") return [d.getFullYear()+"-01-01",d.getFullYear()+"-12-31"];
+  return [iso(new Date(d.getFullYear(),d.getMonth(),1)),iso(new Date(d.getFullYear(),d.getMonth()+1,0))];
+}
+function shift(mode,s,dir){
+  if(mode==="day") return addDays(s,dir);
+  if(mode==="week") return addDays(s,7*dir);
+  const d=parse(s);
+  if(mode==="year") return iso(new Date(d.getFullYear()+dir,0,1));
+  return iso(new Date(d.getFullYear(),d.getMonth()+dir,1));
+}
+function rangeLabel(mode,[a,b]){
+  if(mode==="day") return nice(a);
+  if(mode==="year") return "Year "+parse(a).getFullYear();
+  if(mode==="month"){ const d=parse(a); return MONTHS[d.getMonth()]+" "+d.getFullYear(); }
+  return short(a)+" – "+short(b)+", "+parse(b).getFullYear();
+}
+function datesIn([a,b]){ const out=[]; for(let s=a;s<=b;s=addDays(s,1)) out.push(s); return out; }
+
+/* ---------- math ---------- */
+const n=v=>{ const x=Number(v); return isFinite(x)&&x>0?x:0; };
+const fmt=x=>x.toLocaleString("en-PH");
+const peso=x=>"₱"+x.toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct=(a,b)=>b>0?a/b*100:0;
+const pctTxt=p=>(Math.round(p*10)/10)+"%";
+function cell(date,bid,iid){ const r=(((S.days[date]||{}).rows||{})[bid]||{})[iid]||{}; return {sent:n(r.sent),pulled:n(r.pulled),damaged:n(r.damaged),price:r.price!==undefined?n(r.price):iprice(iid)}; }
+function sum(list){ const t={sent:0,pulled:0,damaged:0,vSent:0,vPulled:0,vDamaged:0}; list.forEach(r=>{ t.sent+=r.sent; t.pulled+=r.pulled; t.damaged+=r.damaged; const p=r.price||0; t.vSent+=r.sent*p; t.vPulled+=r.pulled*p; t.vDamaged+=r.damaged*p; }); t.net=t.sent-t.pulled-t.damaged; t.vNet=t.vSent-t.vPulled-t.vDamaged; return t; }
+function iname(id){ const x=S.items.find(i=>i.id===id); return x?x.name:"(removed item)"; }
+function iprice(id){ const x=S.items.find(i=>i.id===id); return x&&n(x.price)||0; }
+function bname(id){ const x=S.branches.find(b=>b.id===id); return x?x.name:"(removed branch)"; }
+const activeBranches=()=>S.branches.filter(b=>!b.gone);
+function rowsFor(dates,bFilter){ // flat list of {date,bid,iid,sent,pulled,damaged,price}
+  const out=[];
+  dates.forEach(d=>{ const rows=(S.days[d]||{}).rows||{};
+    Object.keys(rows).forEach(bid=>{ if(bFilter&&bid!==bFilter) return;
+      Object.keys(rows[bid]||{}).forEach(iid=>{ const c=cell(d,bid,iid); if(c.sent||c.pulled||c.damaged) out.push(Object.assign({date:d,bid,iid},c)); }); }); });
+  return out;
+}
+function group(rows,key){ const g={}; rows.forEach(r=>{ (g[r[key]]=g[r[key]]||[]).push(r); }); return g; }
+function orderIds(ids,list){ const known=list.map(x=>x.id).filter(id=>ids.includes(id)); return known.concat(ids.filter(id=>!known.includes(id))); }
+const anyPrice=()=>true;
+
+/* ---------- storage ---------- */
+function saveLocal(){ try{ localStorage.setItem(LS,JSON.stringify({main:S.main,items:S.items,branches:S.branches,days:S.days})); }catch(e){} }
+function loadLocal(){ try{ const j=JSON.parse(localStorage.getItem(LS)||"null"); if(j){ S.main=j.main||S.main; S.items=j.items||[]; S.branches=j.branches||[]; S.days={}; Object.keys(j.days||{}).forEach(k=>S.days[k]=normDay(k,j.days[k])); } }catch(e){} }
+const timers={}, dirty=new Set(), writing={};
+function queueDay(date){ saveLocal(); if(!live) return; dirty.add(date); clearTimeout(timers[date]); timers[date]=setTimeout(()=>writeDay(date),600); }
+async function writeDay(date){
+  if(writing[date]){ writing[date]="again"; return; }
+  writing[date]=true; setSync("Saving…");
+  try{ const d=ensureDay(date); await db.collection("delivery/setup/days").doc(date).set({date,drops:d.drops,ready:d.ready||[],rows:aggRows(d.drops),updatedAt:Date.now()}); dirty.delete(date); setSync("Saved"); }
+  catch(e){ setSync("Could not save. Check your connection; changes are kept on this device."); }
+  const again=writing[date]==="again"; writing[date]=false; if(again) writeDay(date);
+}
+let setupWriting=false, setupAgain=false;
+async function writeSetup(){
+  saveLocal(); if(!live) return;
+  if(setupWriting){ setupAgain=true; return; }
+  setupWriting=true; setSync("Saving…");
+  try{ await db.doc("delivery/setup").set({main:S.main,items:S.items,branches:S.branches,updatedAt:Date.now()}); setSync("Saved"); }
+  catch(e){ setSync("Could not save the lists. Try again."); }
+  setupWriting=false; if(setupAgain){ setupAgain=false; writeSetup(); }
+}
+function setSync(t){ $("sync").textContent=t; }
+function toast(t){ const el=$("toast"); el.textContent=t; el.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>el.hidden=true,2200); }
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ---------- tiles ---------- */
+function tiles(el,t,sub){
+  const pp=pct(t.pulled,t.sent), dp=pct(t.damaged,t.sent), money=anyPrice();
+  el.innerHTML=`
+   <div class="tile"><span class="k"><i style="background:var(--sent)"></i>Delivered</span><span class="v">${fmt(t.sent)}</span><span class="s">${sub||"pieces sent"}${money?" · "+peso(t.vSent):""}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--pull)"></i>Pulled out</span><span class="v">${fmt(t.pulled)}</span><span class="s"><span class="pill ${pp>=15?"mid":"lo"}">${pctTxt(pp)} of delivered</span></span></div>
+   <div class="tile"><span class="k"><i style="background:var(--dmg)"></i>Damaged</span><span class="v">${fmt(t.damaged)}</span><span class="s"><span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)} of delivered</span>${money?" · "+peso(t.vDamaged):""}</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--net)"></i>Net</span><span class="v" style="${t.net<0?"color:var(--dmg)":""}">${fmt(t.net)}</span><span class="s">${t.net<0?"more out than delivered":"kept at branch"}${money?" · "+peso(t.vNet):""}</span></div>`;
+}
+
+/* ---------- trips: every delivery is one numbered receipt ---------- */
+const PREFIX="DR-";
+const recNo=x=>x?PREFIX+String(x).padStart(5,"0"):"No number";
+const amt2=x=>x.toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2});
+const qtyOf=it=>({sent:n(it&&it.sent),pulled:n(it&&it.pulled),damaged:n(it&&it.damaged)});
+const priceOf=(it,iid)=>it&&it.price!==undefined&&it.price!==""?n(it.price):iprice(iid);
+// Day totals per branch and item, kept in the day doc as `rows` (other syncs read this shape).
+function aggRows(drops){
+  const rows={};
+  (drops||[]).forEach(t=>{ if(t.void) return;
+    Object.keys(t.items||{}).forEach(iid=>{ const q=qtyOf(t.items[iid]); if(!(q.sent||q.pulled||q.damaged)) return;
+      const p=priceOf(t.items[iid],iid), br=rows[t.bid]=rows[t.bid]||{}, r=br[iid]=br[iid]||{sent:0,pulled:0,damaged:0,_v:0};
+      r.sent+=q.sent; r.pulled+=q.pulled; r.damaged+=q.damaged; r._v+=q.sent*p; r._p=p; }); });
+  Object.values(rows).forEach(br=>Object.values(br).forEach(r=>{ r.price=r.sent?Math.round(r._v/r.sent*100)/100:(r._p||0); delete r._v; delete r._p; }));
+  return rows;
+}
+// Days saved before trips existed have only `rows` (+ `trips` driver/notes): show each branch's day as one earlier entry.
+function normDay(date,v){
+  v=v||{}; let drops;
+  if(Array.isArray(v.drops)) drops=v.drops.map(t=>Object.assign({},t,{items:Object.assign({},t.items)}));
+  else drops=Object.keys(v.rows||{}).map(bid=>{ const tr=(v.trips||{})[bid]||{}; return {id:"old-"+bid,no:0,bid,date,time:"",driver:tr.driver||"",note:tr.note||"",items:JSON.parse(JSON.stringify(v.rows[bid]||{})),at:0}; });
+  const ready=Array.isArray(v.ready)?v.ready.map(r=>Object.assign({},r,{items:Object.assign({},r.items)})):[];
+  return {date,drops,ready,rows:aggRows(drops)};
+}
+function ensureDay(d){ if(!S.days[d]) S.days[d]={date:d,drops:[],ready:[],rows:{}}; if(!Array.isArray(S.days[d].drops)) S.days[d]=normDay(d,S.days[d]); return S.days[d]; }
+function tripsOf(d,bid){ return ((S.days[d]||{}).drops||[]).filter(t=>!bid||t.bid===bid).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99")||(a.no||0)-(b.no||0)); }
+function tripIndex(d,t){ return tripsOf(d,t.bid).filter(x=>!x.void).indexOf(t)+1; }
+function nextNo(){ let m=0; Object.values(S.days).forEach(day=>(day.drops||[]).forEach(t=>{ if((t.no||0)>m) m=t.no; })); return m+1; }
+function tripTotals(t){ return sum(Object.keys(t.items||{}).map(iid=>Object.assign(qtyOf(t.items[iid]),{price:priceOf(t.items[iid],iid)}))); }
+function timeTxt(hm){ if(!hm) return "–"; const [h,m]=hm.split(":").map(Number); return ((h%12)||12)+":"+String(m).padStart(2,"0")+(h<12?" AM":" PM"); }
+function nowHM(){ const d=new Date(); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function lastTrip(){ let L=null; Object.values(S.days).forEach(day=>(day.drops||[]).forEach(t=>{ if(!L||(t.at||0)>(L.at||0)) L=t; })); return L||{}; }
+function issuers(){ const s=new Set(); Object.values(S.days).forEach(day=>(day.drops||[]).forEach(t=>{ if(t.by) s.add(t.by); })); return [...s].sort(); }
+function drivers(){ const s=new Set(); Object.values(S.days).forEach(day=>(day.drops||[]).forEach(t=>{ if(t.driver) s.add(t.driver); })); return [...s].sort(); }
+
+/* ---------- ready for delivery: production posts what is ready; every receipt deducts from it ---------- */
+function readyMap(d){ // {iid:{ready,sent,avail}} for the whole day, all branches
+  const m={}, pr=(S.prod[d]||{}).items||{};
+  Object.keys(pr).forEach(k=>{ m[k]={ready:n(pr[k].qty),sent:0,name:pr[k].name||""}; });
+  rowsFor([d]).forEach(r=>{ (m[r.iid]=m[r.iid]||{ready:0,sent:0}).sent+=r.sent; });
+  Object.values(m).forEach(x=>x.avail=x.ready-x.sent);
+  return m;
+}
+function availPill(a,ready){ return !ready&&a<=0?`<span class="pill mid">Not inspected yet</span>`:a<0?`<span class="pill hi">${fmt(-a)} over</span>`:a===0?`<span class="pill hi">None left</span>`:`<span class="pill lo">${fmt(a)} left</span>`; }
+function renderReadyIfIdle(){ if(S.tab!=="day") return; const ae=document.activeElement; if(S.form&&ae&&ae.closest&&ae.closest("#tripForm")){ renderReady(); return; } renderDay(); }
+function renderReady(){
+  const d=S.dDate, el=$("dReady"); if(!el) return;
+  if(!S.items.length){ el.innerHTML=""; return; }
+  const m=readyMap(d), ids=orderIds(Object.keys(m),S.items), lots=((S.days[d]||{}).ready||[]).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+  const T=ids.reduce((t,iid)=>{ t.ready+=m[iid].ready; t.sent+=m[iid].sent; return t; },{ready:0,sent:0});
+  el.innerHTML=`<div class="card ready">
+    <div class="bar" style="justify-content:space-between"><h2>Available for delivery</h2><span class="bar"><span class="sync" id="rSync">${syncTxt()}</span><button class="btn sm" id="syncNow">Update now</button></span></div>
+    ${ids.length?`<div class="sheet"><table><thead><tr><th>Bread</th><th>Passed inspection</th><th>Delivered</th><th>Available</th></tr></thead><tbody>${
+      ids.map(iid=>{ const x=m[iid]; return `<tr><td>${esc(iid.startsWith("x:")?x.name:iname(iid))}${iid.startsWith("x:")?`<span class="sub">Not in your item list here. Add it in Branches &amp; items with the same name.</span>`:""}</td><td>${fmt(x.ready)}</td><td>${fmt(x.sent)}</td><td><b>${fmt(Math.max(0,x.avail))}</b> ${availPill(x.avail,x.ready)}</td></tr>`; }).join("")
+    }</tbody><tfoot><tr><td>Total</td><td>${fmt(T.ready)}</td><td>${fmt(T.sent)}</td><td>${fmt(Math.max(0,T.ready-T.sent))}</td></tr></tfoot></table></div>`
+      :`<p class="note">No bread has passed inspection in Bakery Production for this day yet.</p>`}
+    <p class="note">Comes from Bakery Production: pieces that pass quality inspection there show here, and every delivery receipt deducts from them. It updates every hour from 5 AM to 8 PM, or right away when you tap Update now (takes a minute or two).</p>
+    ${""&&lots.length?`<div class="lots">${lots.map(r=>`<div class="lot"><span><b>${timeTxt(r.time)}</b>${r.by?" · "+esc(r.by):""} · ${orderIds(Object.keys(r.items||{}),S.items).filter(iid=>n(r.items[iid])).map(iid=>esc(iname(iid))+" "+fmt(n(r.items[iid]))).join(", ")}${r.note?` <span class="sub">${esc(r.note)}</span>`:""}</span><span class="bar"><button class="btn sm" data-redit="${r.id}">Edit</button><button class="btn sm danger" data-rdel="${r.id}">${pendingConfirm==="r:"+r.id?"Tap again":"Remove"}</button></span></div>`).join("")}</div>`:""}
+  </div>`;
+}
+const SYNC_TRIGGER="trig_01LQ5qTzEiJE5AVNq2Fb8BAV";
+function syncTxt(){ const x=S.sync; if(S.syncing) return "Updating… (a minute or two)"; if(!x||!x.at) return "Not updated yet";
+  const d=new Date(x.at), t=d.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}), day=iso(d)===today()?"":" "+short(iso(d));
+  return x.ok?"Updated "+t+day:"Last update failed "+t+day; }
+async function syncNow(){
+  const m=window.claude&&claude.use?await claude.use("mcp"):null;
+  if(!m){ toast("Update now is not available in this view. It still updates every hour."); return; }
+  S.syncing=Date.now(); renderReady();
+  try{ await m.callTool("Claude Code Remote","fire_trigger",{trigger_id:SYNC_TRIGGER}); toast("Updating from Bakery Production…"); }
+  catch(e){ S.syncing=0; renderReady(); toast(e&&e.code==="not_granted"?"Allow the Claude Code Remote connection to use Update now.":"Could not start the update. It still runs every hour."); return; }
+  setTimeout(()=>{ if(S.syncing){ S.syncing=0; renderReady(); } },300000);
+}
+function readyFormHTML(){
+  const f=S.rform;
+  return `<form class="card" id="readyForm" autocomplete="off" style="background:var(--bg)">
+    <h3>${f.id?"Edit ready bread":"Bread ready for delivery"}</h3>
+    <div class="trip">
+      <label>Time ready<input id="rTime" type="time" value="${esc(f.time)}"></label>
+      <label>Posted by (production)<input id="rBy" list="byList2" value="${esc(f.by)}" placeholder="Production staff name"></label>
+    </div>
+    <datalist id="byList2">${issuers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
+    <div class="sheet"><table><thead><tr><th>Bread</th><th>Pieces ready</th></tr></thead><tbody>${
+      S.items.map(i=>`<tr><td>${esc(i.name)}</td><td><input id="r-${i.id}" type="number" min="0" step="1" inputmode="numeric" data-ri="${i.id}" value="${f.items[i.id]||""}" aria-label="${esc(i.name)} pieces ready"></td></tr>`).join("")
+    }</tbody></table></div>
+    <div class="trip"><label style="grid-column:1/-1">Notes<input id="rNote" value="${esc(f.note)}" placeholder="e.g. second batch, for afternoon trips"></label></div>
+    <div class="bar"><button class="btn primary" type="submit">${f.id?"Save changes":"Post as available"}</button><button class="btn" type="button" id="rCancel">Cancel</button></div>
+  </form>`;
+}
+function openReady(r){
+  pendingConfirm=null;
+  S.rform=r?{id:r.id,date:S.dDate,time:r.time||"",by:r.by||"",note:r.note||"",items:Object.assign({},r.items)}
+          :{id:null,date:S.dDate,time:S.dDate===today()?nowHM():"",by:lastTrip().by||"",note:"",items:{}};
+  renderReady(); const el=$("rTime"); if(el) el.focus();
+}
+function saveReady(){
+  const f=S.rform, items={};
+  Object.keys(f.items).forEach(iid=>{ const q=n(f.items[iid]); if(q) items[iid]=Math.floor(q); });
+  if(!Object.keys(items).length){ toast("Type how many pieces of each bread are ready."); return; }
+  const day=ensureDay(f.date); day.ready=day.ready||[];
+  const old=f.id?day.ready.find(x=>x.id===f.id):null;
+  const r={id:old?old.id:"r"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),time:f.time||"",by:(f.by||"").trim(),note:(f.note||"").trim(),items,at:old?old.at:Date.now()};
+  if(old) day.ready[day.ready.indexOf(old)]=r; else day.ready.push(r);
+  S.rform=null; queueDay(f.date); renderReady(); toast(old?"Saved":"Posted as available for delivery");
+}
+function removeReady(id){
+  const day=ensureDay(S.dDate); day.ready=(day.ready||[]).filter(x=>x.id!==id); pendingConfirm=null;
+  queueDay(S.dDate); renderReady(); toast("Removed");
+}
+
+/* ---------- render: deliveries ---------- */
+function renderDay(){
+  if(S.rform&&S.rform.date!==S.dDate) S.rform=null;
+  renderReady();
+  const d=S.dDate; $("dDate").value=d; $("dLabel").textContent=nice(d)+(d===today()?" · today":"");
+  const act=activeBranches();
+  if(!S.dBranch||!act.some(b=>b.id===S.dBranch)) S.dBranch=act[0]?act[0].id:"";
+  $("dBranches").innerHTML=act.map(b=>{ const k=tripsOf(d,b.id).filter(t=>!t.void).length; return `<button class="chip" data-branch="${b.id}" aria-pressed="${b.id===S.dBranch}">${esc(b.name)}${k?` <span class="cnt">${k}</span>`:""}</button>`; }).join("");
+  const body=$("dBody");
+  if(!act.length||!S.items.length){
+    body.innerHTML=`<div class="sheet"><div class="empty">${!act.length?"No branches yet.":"No items yet."} Open <b>Branches &amp; items</b> to add the branches you deliver to and the breads you send. Then come back here to log each delivery.</div></div>`;
+    renderDayAll(); return;
+  }
+  if(S.form&&(S.form.date!==d||S.form.bid!==S.dBranch)) S.form=null;
+  const bid=S.dBranch, trips=tripsOf(d,bid), live_=trips.filter(t=>!t.void), t=sum(rowsFor([d],bid));
+  let k=0;
+  body.innerHTML=`
+    <div class="route"><b>${esc(S.main||"Main store")}</b><span class="arrow" aria-hidden="true"></span><b>${esc(bname(bid))}</b></div>
+    <div class="tiles" id="dTiles"></div>
+    <div class="bar" style="justify-content:space-between"><h2>Deliveries to ${esc(bname(bid))}</h2>${S.form?"":`<button class="btn primary" id="newTrip">+ New delivery</button>`}</div>
+    ${S.form&&S.form.bid===bid&&S.form.date===d?formHTML():""}
+    ${S.showRec&&trips.some(x=>x.id===S.showRec)?recCard(trips.find(x=>x.id===S.showRec)):""}
+    <div class="sheet">${trips.length?`<table><thead><tr><th>Trip</th><th style="text-align:left">Receipt no.</th><th style="text-align:left">Driver</th><th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Amount</th><th></th></tr></thead><tbody>${
+      trips.map(x=>{ const tt=tripTotals(x), i=x.void?"":++k;
+        return `<tr class="${x.void?"void":""}"><td>${x.void?`<span class="pill hi">Void</span>`:`<b>Trip ${i}</b>`}<span class="sub">${timeTxt(x.time)}</span></td><td style="text-align:left"><a href="#" data-rec="${x.id}">${recNo(x.no)}</a></td><td style="text-align:left">${esc(x.driver||"")}</td>
+          <td>${fmt(tt.sent)}</td><td>${fmt(tt.pulled)}</td><td>${fmt(tt.damaged)}</td><td>${peso(tt.vSent)}</td>
+          <td><button class="btn sm" data-rec="${x.id}">Receipt</button></td></tr>`; }).join("")
+    }</tbody><tfoot><tr><td>Total</td><td style="text-align:left">${live_.length} trip${live_.length===1?"":"s"}</td><td></td><td>${fmt(t.sent)}</td><td>${fmt(t.pulled)}</td><td>${fmt(t.damaged)}</td><td>${peso(t.vSent)}</td><td></td></tr></tfoot></table>`
+      :`<div class="empty">No deliveries to ${esc(bname(bid))} on this day yet. Tap <b>+ New delivery</b> each time the driver leaves with bread. Every delivery gets its own receipt.</div>`}</div>
+    ${live_.length?dayItemsHTML(d,bid,live_):""}
+    ${live_.length?`<div class="printbar"><button class="btn" id="slipOne">Save day summary PDF</button><button class="btn" id="recsOne">Save all ${live_.length} receipt${live_.length===1?"":"s"} as PDF</button></div>`:""}`;
+  tiles($("dTiles"),t,live_.length+" trip"+(live_.length===1?"":"s")+" today");
+  renderDayAll();
+}
+// Per-bread summary with one column per trip, so the day reads at a glance.
+function dayItemsHTML(d,bid,trips){
+  const ids=orderIds([...new Set(trips.flatMap(x=>Object.keys(x.items||{}).filter(iid=>{ const q=qtyOf(x.items[iid]); return q.sent||q.pulled||q.damaged; })))],S.items);
+  const T=sum(ids.map(iid=>cell(d,bid,iid)));
+  return `<h2>Day summary by bread</h2><div class="sheet"><table><thead><tr><th>Bread</th>${trips.map((x,i)=>`<th>Trip ${i+1}<span class="sub">${timeTxt(x.time)}</span></th>`).join("")}<th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Net</th><th>Amount</th><th>Net amount</th></tr></thead><tbody>${
+    ids.map(iid=>{ const c=cell(d,bid,iid), net=c.sent-c.pulled-c.damaged;
+      return `<tr><td>${esc(iname(iid))}</td>${trips.map(x=>{ const q=qtyOf((x.items||{})[iid]); return `<td>${q.sent?fmt(q.sent):"–"}</td>`; }).join("")}<td><b>${fmt(c.sent)}</b></td><td>${fmt(c.pulled)}</td><td>${fmt(c.damaged)}</td><td class="${net<0?"neg":""}">${fmt(net)}</td><td>${peso(c.sent*c.price)}</td><td>${peso(net*c.price)}</td></tr>`; }).join("")
+  }</tbody><tfoot><tr><td>Total</td>${trips.map(x=>`<td>${fmt(tripTotals(x).sent)}</td>`).join("")}<td>${fmt(T.sent)}</td><td>${fmt(T.pulled)}</td><td>${fmt(T.damaged)}</td><td>${fmt(T.net)}</td><td>${peso(T.vSent)}</td><td>${peso(T.vNet)}</td></tr></tfoot></table></div>`;
+}
+function formHTML(){
+  const f=S.form, old=f.id?tripsOf(f.date,f.bid).find(x=>x.id===f.id):null;
+  const ids=S.items.map(i=>i.id).concat(Object.keys(f.items).filter(k=>!S.items.some(i=>i.id===k)));
+  const ft=formTotals();
+  return `<form class="card" id="tripForm" autocomplete="off">
+    <div class="bar" style="justify-content:space-between"><h3>${old?"Edit receipt "+recNo(old.no):"New delivery to "+esc(bname(f.bid))}</h3><span class="pill lo">${old?"":"Will be "}${recNo(old?old.no:nextNo())}</span></div>
+    <div class="trip">
+      <label>Time left main store<input id="fTime" type="time" value="${esc(f.time)}"></label>
+      <label>Driver<input id="fDriver" list="driverList" value="${esc(f.driver)}" placeholder="Who is delivering"></label>
+      <label>Issued by (production)<input id="fBy" list="byList" value="${esc(f.by)}" placeholder="Production staff name"></label>
+    </div>
+    <datalist id="byList">${issuers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
+    <datalist id="driverList">${drivers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
+    <div class="sheet"><table><thead><tr><th>Bread</th><th>Price ₱</th><th>Available</th><th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Amount</th></tr></thead><tbody>${
+      ids.map(iid=>{ const it=f.items[iid]||{}, p=priceOf(it,iid);
+        const inp=k=>`<input id="f-${iid}-${k}" type="number" min="0" step="1" inputmode="numeric" data-fi="${iid}" data-f="${k}" value="${it[k]===undefined?"":it[k]}" aria-label="${esc(iname(iid))} ${k}">`;
+        const av=formAvail(iid), left=av===null?null:av-n(it.sent);
+        return `<tr><td>${esc(iname(iid))}</td><td><input id="f-${iid}-price" type="number" min="0" step="0.01" inputmode="decimal" data-fi="${iid}" data-f="price" value="${p||""}" placeholder="₱" aria-label="${esc(iname(iid))} price"></td><td id="fv-${iid}">${availCell(left)}</td><td>${inp("sent")}</td><td>${inp("pulled")}</td><td>${inp("damaged")}</td><td id="fa-${iid}">${peso(n(it.sent)*p)}</td></tr>`; }).join("")
+    }</tbody><tfoot><tr><td>Total</td><td></td><td></td><td id="ft-sent">${fmt(ft.sent)}</td><td id="ft-pulled">${fmt(ft.pulled)}</td><td id="ft-damaged">${fmt(ft.damaged)}</td><td id="ft-amt">${peso(ft.vSent)}</td></tr></tfoot></table></div>
+    <div id="fWarn">${overTxt()}</div>
+    <p class="note">Delivered = bread the driver takes to the branch on this trip. Pulled out and Damaged = bread the driver brings back from the branch on this trip (leave blank if none).</p>
+    <div class="trip"><label style="grid-column:1/-1">Notes<input id="fNote" value="${esc(f.note)}" placeholder="e.g. 2 trays short, stale bread pulled out"></label></div>
+    <div class="bar"><button class="btn primary" type="submit">${old?"Save changes":"Save and issue receipt"}</button><button class="btn" type="button" id="fCancel">Cancel</button>${old?`<button class="btn danger" type="button" id="fVoid">${pendingConfirm==="v:"+old.id?"Tap again to void":"Void this receipt"}</button>`:""}</div>
+  </form>`;
+}
+// Available for this trip = ready − delivered on the day's other receipts (an edited receipt's own pieces count as available).
+function formAvail(iid){ return null; const f=S.form, x=readyMap(f.date)[iid]; if(!x||!x.ready) return null;
+  const old=f.id?((S.days[f.date]||{}).drops||[]).find(t=>t.id===f.id):null; return x.avail+(old&&!old.void?qtyOf((old.items||{})[iid]).sent:0); }
+function availCell(left){ return left===null?`<span class="sub">not inspected yet</span>`:`<b>${fmt(Math.max(0,left))}</b><span class="avail ${left<0?"bad":"ok"}">${left<0?fmt(-left)+" more than ready":"left after this"}</span>`; }
+function overTxt(){ const f=S.form; if(!f) return ""; const over=Object.keys(f.items).filter(iid=>{ const av=formAvail(iid); return av!==null&&n((f.items[iid]||{}).sent)>av; });
+  return over.length?`<div class="warnbox">More than what passed inspection: ${over.map(iid=>esc(iname(iid))).join(", ")}. You can still save; check with production.</div>`:""; }
+function formTotals(){ const f=S.form; return sum(Object.keys(f.items).map(iid=>Object.assign(qtyOf(f.items[iid]),{price:priceOf(f.items[iid],iid)}))); }
+function onFormInput(e){
+  const el=e.target, f=S.form; if(!f) return;
+  if(el.id==="fTime"){ f.time=el.value; return; } if(el.id==="fDriver"){ f.driver=el.value; return; } if(el.id==="fBy"){ f.by=el.value; return; } if(el.id==="fNote"){ f.note=el.value; return; }
+  const iid=el.dataset.fi, k=el.dataset.f; if(!iid) return;
+  const it=f.items[iid]=Object.assign({},f.items[iid]);
+  if(k==="price"){ const v=el.value===""?0:Math.max(0,Math.round((Number(el.value)||0)*100)/100); it.price=v;
+    const x=S.items.find(i=>i.id===iid); if(x&&!f.id){ x.price=v; clearTimeout(onFormInput.p); onFormInput.p=setTimeout(writeSetup,700); } }
+  else if(el.value==="") delete it[k]; else it[k]=Math.max(0,Math.floor(Number(el.value)||0));
+  $("fa-"+iid).textContent=peso(n(it.sent)*priceOf(it,iid));
+  const av=formAvail(iid); $("fv-"+iid).innerHTML=availCell(av===null?null:av-n(it.sent)); $("fWarn").innerHTML=overTxt();
+  const ft=formTotals(); ["sent","pulled","damaged"].forEach(q=>$("ft-"+q).textContent=fmt(ft[q])); $("ft-amt").textContent=peso(ft.vSent);
+}
+function openForm(t){
+  pendingConfirm=null;
+  const L=lastTrip();
+  S.form=t?{id:t.id,bid:t.bid,date:S.dDate,time:t.time||"",driver:t.driver||"",by:t.by||"",note:t.note||"",items:JSON.parse(JSON.stringify(t.items||{}))}
+          :{id:null,bid:S.dBranch,date:S.dDate,time:S.dDate===today()?nowHM():"",driver:L.driver||"",by:L.by||"",note:"",items:{}};
+  S.showRec=null; renderDay(); const el=$("fTime"); if(el) el.focus();
+}
+function saveForm(){
+  const f=S.form, items={};
+  Object.keys(f.items).forEach(iid=>{ const q=qtyOf(f.items[iid]); if(q.sent||q.pulled||q.damaged){ const o={}; ["sent","pulled","damaged"].forEach(k=>{ if(q[k]) o[k]=q[k]; }); o.price=priceOf(f.items[iid],iid); items[iid]=o; } });
+  if(!Object.keys(items).length){ toast("Type how many of each bread were delivered."); return; }
+  const day=ensureDay(f.date), old=f.id?day.drops.find(x=>x.id===f.id):null;
+  const t={id:old?old.id:"t"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),no:old?old.no:nextNo(),bid:f.bid,date:f.date,time:f.time||"",driver:(f.driver||"").trim(),by:(f.by||"").trim(),note:(f.note||"").trim(),items,at:old?old.at:Date.now()};
+  if(old&&!old.no) t.no=nextNo(); // earlier entries get a number when first saved here
+  if(old) day.drops[day.drops.indexOf(old)]=t; else day.drops.push(t);
+  day.rows=aggRows(day.drops);
+  S.form=null; S.showRec=t.id; queueDay(f.date,true); renderDay();
+  toast(old?"Saved "+recNo(t.no):"Receipt "+recNo(t.no)+" issued");
+  const el=$("recCard"); if(el) el.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function voidTrip(id){
+  const day=ensureDay(S.dDate), t=day.drops.find(x=>x.id===id); if(!t) return;
+  t.void=true; t.voidAt=today(); day.rows=aggRows(day.drops); S.form=null; S.showRec=id; pendingConfirm=null;
+  queueDay(S.dDate,true); renderDay(); toast(recNo(t.no)+" voided. It stays on the list but is not counted.");
+}
+
+/* ---------- receipt (always light, fixed width so the PDF looks the same from any phone) ---------- */
+function recHTML(t){
+  const d=t.date, ids=orderIds(Object.keys(t.items||{}),S.items), tt=tripTotals(t), idx=tripIndex(d,t);
+  const back=ids.filter(iid=>{ const q=qtyOf(t.items[iid]); return q.pulled||q.damaged; });
+  return `<div class="rc">
+    ${t.void?`<div class="stamp">VOID</div>`:""}
+    <div class="top"><div class="biz"><b>${esc(S.main||"Main store")}</b><span>Production delivery of finished products to branch</span></div>
+      <div class="no"><div class="t">Delivery Receipt</div><div class="n">No. ${recNo(t.no)}</div><div class="d">${esc(nice(d))}${t.time?" · "+timeTxt(t.time):""}</div></div></div>
+    <div class="flds">
+      <div class="fld"><span class="k">Delivered to</span><span class="v">${esc(bname(t.bid))}</span></div>
+      <div class="fld"><span class="k">Trip</span><span class="v">${idx>0?idx+" of the day":""}</span></div>
+      <div class="fld"><span class="k">From</span><span class="v">${esc(S.main||"Main store")}</span></div>
+      <div class="fld"><span class="k">Driver</span><span class="v">${esc(t.driver||"")}</span></div>
+    </div>
+    <table><thead><tr><th>Qty</th><th class="l">Bread</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>
+      ${ids.filter(iid=>qtyOf(t.items[iid]).sent).map(iid=>{ const q=qtyOf(t.items[iid]), p=priceOf(t.items[iid],iid); return `<tr><td>${fmt(q.sent)}</td><td class="l">${esc(iname(iid))}</td><td>${p?amt2(p):""}</td><td>${amt2(q.sent*p)}</td></tr>`; }).join("")}
+      <tr class="tot"><td>${fmt(tt.sent)}</td><td class="l">TOTAL (pieces / amount)</td><td></td><td>₱${amt2(tt.vSent)}</td></tr></tbody></table>
+    ${back.length?`<div class="sec">Brought back from the branch on this trip</div><table><thead><tr><th class="l">Bread</th><th>Pulled out</th><th>Damaged</th><th>Value</th></tr></thead><tbody>
+      ${back.map(iid=>{ const q=qtyOf(t.items[iid]), p=priceOf(t.items[iid],iid); return `<tr><td class="l">${esc(iname(iid))}</td><td>${fmt(q.pulled)}</td><td>${fmt(q.damaged)}</td><td>${amt2((q.pulled+q.damaged)*p)}</td></tr>`; }).join("")}</tbody></table>`:""}
+    ${t.note?`<div class="note2"><b>Notes:</b> ${esc(t.note)}</div>`:""}
+    ${t.void?`<div class="note2"><b>Voided ${t.voidAt?esc(nice(t.voidAt)):""}.</b> Not counted in the totals.</div>`:""}
+    <div class="sig"><div><b>${esc(t.by||"")}</b>Issued by (production)</div><div><b>${esc(t.driver||"")}</b>Delivered by (driver)</div><div><b></b>Received by (branch)</div></div>
+    <div class="foot">Branch: count the bread on arrival, then sign over your printed name. Keep one copy at the branch; the driver returns one to the main store.</div>
+  </div>`;
+}
+function recCard(t){
+  return `<div class="card" id="recCard">
+    <div class="bar" style="justify-content:space-between"><h3>Receipt ${recNo(t.no)} ${t.void?`<span class="pill hi">Void</span>`:""}</h3><button class="btn sm" id="recClose">Close</button></div>
+    <div class="bar"><button class="btn primary" data-recpdf="${t.id}">Save receipt PDF to print</button>${t.void?"":`<button class="btn" data-edit="${t.id}">Edit</button>`}</div>
+    <div class="preview">${recHTML(t)}</div>
+    <p class="note">To print: save the PDF, open it, then use Print or Share › Print. Print two copies: one for the branch, one for the main store.</p>
+  </div>`;
+}
+function fitPreviews(){ document.querySelectorAll(".wrap .preview").forEach(p=>{ const rc=p.firstElementChild; if(!rc) return; const k=Math.min(1,(p.clientWidth-24)/640); rc.style.zoom=k>0?k:1; }); }
+window.addEventListener("resize",fitPreviews);
+
+function renderDayAll(){
+  const d=S.dDate, rows=rowsFor([d]), g=group(rows,"bid");
+  const ids=orderIds(Object.keys(g),S.branches);
+  $("recsAll").hidden=!ids.length;
+  if(!ids.length){ $("dAll").innerHTML=`<div class="empty">No deliveries logged on this day yet.</div>`; fitPreviews(); return; }
+  const T=sum(rows); let trips=0;
+  $("dAll").innerHTML=`<table><thead><tr><th>Branch</th><th>Trips</th><th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Net</th><th>Amount carried</th><th>Net amount</th></tr></thead><tbody>${
+    ids.map(bid=>{ const t=sum(g[bid]), k=tripsOf(d,bid).filter(x=>!x.void).length; trips+=k;
+      return `<tr><td><a href="#" data-pick="${bid}">${esc(bname(bid))}</a></td><td>${k}</td><td>${fmt(t.sent)}</td><td>${fmt(t.pulled)}</td><td>${fmt(t.damaged)}</td><td class="${t.net<0?"neg":""}">${fmt(t.net)}</td><td>${peso(t.vSent)}</td><td>${peso(t.vNet)}</td></tr>`; }).join("")
+  }</tbody><tfoot><tr><td>Total</td><td>${trips}</td><td>${fmt(T.sent)}</td><td>${fmt(T.pulled)}</td><td>${fmt(T.damaged)}</td><td>${fmt(T.net)}</td><td>${peso(T.vSent)}</td><td>${peso(T.vNet)}</td></tr></tfoot></table>`;
+  fitPreviews();
+}
+
+/* ---------- day summary slip ---------- */
+function slipHTML(d,bid){
+  const trips=tripsOf(d,bid).filter(x=>!x.void);
+  const ids=orderIds(Object.keys((((S.days[d]||{}).rows)||{})[bid]||{}),S.items);
+  const list=ids.map(iid=>Object.assign({iid},cell(d,bid,iid))), t=sum(list);
+  return `<div class="slip">
+    <div class="top"><div><b>${esc(S.main||"Main store")}</b><span style="font-size:12px;color:#555">Day summary of deliveries to branch</span></div>
+      <div><div class="t">Delivery Summary</div><div class="n">${esc(nice(d))}</div></div></div>
+    <div class="flds">
+      <div class="fld"><span class="k">Branch</span><span class="v">${esc(bname(bid))}</span></div>
+      <div class="fld"><span class="k">Trips</span><span class="v">${trips.length}</span></div>
+    </div>
+    <div class="note2">Receipts: ${trips.map(x=>recNo(x.no)+(x.time?" ("+timeTxt(x.time)+")":"")).join(", ")}</div>
+    <table><thead><tr><th style="text-align:left">Bread</th>${trips.map((x,i)=>`<th>Trip ${i+1}</th>`).join("")}<th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Net</th><th>Amount</th></tr></thead><tbody>
+      ${list.map(c=>`<tr><td style="text-align:left">${esc(iname(c.iid))}</td>${trips.map(x=>{ const q=qtyOf((x.items||{})[c.iid]); return `<td>${q.sent?fmt(q.sent):""}</td>`; }).join("")}<td>${fmt(c.sent)}</td><td>${fmt(c.pulled)}</td><td>${fmt(c.damaged)}</td><td>${fmt(c.sent-c.pulled-c.damaged)}</td><td>${amt2(c.sent*c.price)}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td style="text-align:left">TOTAL</td>${trips.map(x=>`<td>${fmt(tripTotals(x).sent)}</td>`).join("")}<td>${fmt(t.sent)}</td><td>${fmt(t.pulled)}</td><td>${fmt(t.damaged)}</td><td>${fmt(t.net)}</td><td>₱${amt2(t.vSent)}</td></tr></tfoot></table>
+    <div class="note2">Net amount (after pull-outs and damages): <b>₱${amt2(t.vNet)}</b></div>
+    <div class="sig"><div><b></b>Prepared by (main store)</div><div><b></b>Checked by</div><div><b></b>Branch in-charge</div></div>
+  </div>`;
+}
+
+/* ---------- PDF ---------- */
+async function saveFile(name,blob){
+  const dl=window.claude&&claude.use?await claude.use("downloads"):null;
+  if(!dl){ toast("Saving files is not available in this view."); return; }
+  try{ await dl.save({filename:name,data:blob}); toast("PDF ready. Open it to print."); }
+  catch(e){ if(!e||e.code!=="declined") toast("Could not save the file."); }
+}
+// window.print() is blocked inside the artifact frame, so printing goes through a PDF.
+async function makePDF(pages,name){ // pages: [{html, w (mm)}]; each page is as tall as its content
+  const J=window.jspdf&&window.jspdf.jsPDF;
+  if(!window.html2canvas||!J){ toast("The PDF tool did not load. Check your connection and try again."); return; }
+  toast("Preparing PDF…");
+  const box=$("cap");
+  try{
+    if(document.fonts&&document.fonts.ready) await document.fonts.ready;
+    let pdf=null;
+    for(const p of pages){
+      box.innerHTML=p.html;
+      const c=await html2canvas(box.firstElementChild,{scale:2,backgroundColor:"#ffffff",logging:false}); box.innerHTML="";
+      const h=Math.round(p.w*c.height/c.width*10)/10, fmtp=[p.w,Math.max(h,60)];
+      if(!pdf) pdf=new J({unit:"mm",format:fmtp,orientation:"portrait"}); else pdf.addPage(fmtp,"portrait");
+      pdf.addImage(c.toDataURL("image/jpeg",.92),"JPEG",0,0,p.w,h);
+    }
+    await saveFile(name,pdf.output("blob"));
+  }catch(e){ box.innerHTML=""; toast("Could not make the PDF."); }
+}
+const safe=s=>String(s).replace(/[^\w-]+/g,"_");
+function saveReceipts(list,name){ list=list.filter(Boolean); if(!list.length){ toast("No receipts to save."); return; } makePDF(list.map(t=>({html:recHTML(t),w:148})),name); }
+function saveSlips(d,bids){
+  bids=bids.filter(b=>tripsOf(d,b).some(x=>!x.void));
+  if(!bids.length){ toast("Nothing logged for this day yet."); return; }
+  makePDF(bids.map(b=>({html:slipHTML(d,b),w:210})),"Delivery_Summary_"+d+(bids.length===1?"_"+safe(bname(bids[0])):"_all_branches")+".pdf");
+}
+
+/* ---------- render: report ---------- */
+function periodData(){ const rg=range(S.rMode,S.rDate), dates=datesIn(rg); return {rg,dates,rows:rowsFor(dates,S.rBranch)}; }
+function rateCells(t){ const pp=pct(t.pulled,t.sent), dp=pct(t.damaged,t.sent);
+  return `<td>${fmt(t.sent)}</td><td>${fmt(t.pulled)}</td><td><span class="pill ${pp>=15?"mid":"lo"}">${pctTxt(pp)}</span></td><td>${fmt(t.damaged)}</td><td><span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)}</span></td><td class="${t.net<0?"neg":""}">${fmt(t.net)}</td>`; }
+const RATE_HEAD="<th>Delivered</th><th>Pulled out</th><th>Pull-out %</th><th>Damaged</th><th>Damage %</th><th>Net</th>";
+function monthRows(dates,rows){ const y=dates[0].slice(0,4), g=group(rows.map(r=>Object.assign({m:r.date.slice(0,7)},r)),"m");
+  return MON.map((m,i)=>{ const key=y+"-"+String(i+1).padStart(2,"0"); return {d:key+"-01",label:m+" "+y,t:sum(g[key]||[])}; }); }
+function renderReport(){
+  const {rg,dates,rows}=periodData(), money=anyPrice();
+  $("rDate").value=S.rDate; $("rMode").value=S.rMode; $("rLabel").textContent=rangeLabel(S.rMode,rg);
+  const opts=[["","All branches"]].concat(orderIds([...new Set(S.branches.map(b=>b.id).concat(rowsFor(dates).map(r=>r.bid)))],S.branches).map(id=>[id,bname(id)]));
+  $("rBranch").innerHTML=opts.map(([v,l])=>`<option value="${v}"${v===S.rBranch?" selected":""}>${esc(l)}</option>`).join("");
+  const T=sum(rows), days=new Set(rows.map(r=>r.date)).size;
+  tiles($("rTiles"),T,days+" delivery day"+(days===1?"":"s"));
+  const vh=money?"<th>Amount carried</th><th>Amount pulled out</th><th>Amount damaged</th><th>Net amount</th>":"";
+  const vc=t=>money?`<td>${peso(t.vSent)}</td><td>${peso(t.vPulled)}</td><td>${peso(t.vDamaged)}</td><td>${peso(t.vNet)}</td>`:"";
+  const none=`<div class="empty">Nothing logged for this period yet.</div>`;
+  $("rByBranchH").hidden=$("rByBranch").hidden=!!S.rBranch;
+  if(!rows.length){ $("rByBranch").innerHTML=$("rByItem").innerHTML=$("rByDay").innerHTML=none; $("rByDayH").hidden=$("rByDay").hidden=S.rMode==="day"; return; }
+  const gb=group(rows,"bid");
+  $("rByBranch").innerHTML=`<table><thead><tr><th>Branch</th><th>Days</th>${RATE_HEAD}${vh}</tr></thead><tbody>${
+    orderIds(Object.keys(gb),S.branches).map(bid=>{ const t=sum(gb[bid]); return `<tr><td><a href="#" data-rbranch="${bid}">${esc(bname(bid))}</a></td><td>${new Set(gb[bid].map(r=>r.date)).size}</td>${rateCells(t)}${vc(t)}</tr>`; }).join("")
+  }</tbody><tfoot><tr><td>Total</td><td>${days}</td>${rateCells(T).replace(/<span class="pill \w+">|<\/span>/g,"")}${vc(T)}</tr></tfoot></table>`;
+  const gi=group(rows,"iid");
+  $("rByItem").innerHTML=`<table><thead><tr><th>Item</th>${RATE_HEAD}${vh}</tr></thead><tbody>${
+    orderIds(Object.keys(gi),S.items).map(iid=>{ const t=sum(gi[iid]); return `<tr><td>${esc(iname(iid))}</td>${rateCells(t)}${vc(t)}</tr>`; }).join("")
+  }</tbody><tfoot><tr><td>Total</td>${rateCells(T).replace(/<span class="pill \w+">|<\/span>/g,"")}${vc(T)}</tr></tfoot></table>`;
+  const yr=S.rMode==="year";
+  $("rByDayH").hidden=$("rByDay").hidden=S.rMode==="day";
+  $("rByDayH").textContent=yr?"By month":"By day";
+  const gd=group(rows,"date");
+  const list=yr?monthRows(dates,rows):dates.map(d=>({d,label:short(d),t:sum(gd[d]||[])}));
+  const max=Math.max(1,...list.map(x=>x.t.sent));
+  $("rByDay").innerHTML=`<table><thead><tr><th>${yr?"Month":"Day"}</th><th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Net</th><th style="text-align:left">Mix</th></tr></thead><tbody>${
+    list.map(({d,label,t})=>{ const w=v=>(Math.max(0,v)/max*100).toFixed(1)+"%";
+      return `<tr${t.sent||t.pulled||t.damaged?"":' style="color:var(--muted)"'}><td><a href="#" data-goto="${d}">${label}</a></td><td>${fmt(t.sent)}</td><td>${fmt(t.pulled)}</td><td>${fmt(t.damaged)}</td><td class="${t.net<0?"neg":""}">${fmt(t.net)}</td>
+      <td><div class="mini" title="Net ${t.net}, pulled out ${t.pulled}, damaged ${t.damaged}"><span style="width:${w(t.net)};background:var(--net)"></span><span style="width:${w(t.pulled)};background:var(--pull)"></span><span style="width:${w(t.damaged)};background:var(--dmg)"></span></div></td></tr>`; }).join("")
+  }</tbody></table>`;
+}
+function exportExcel(){
+  if(!window.XLSX){ toast("The Excel tool did not load. Check your connection."); return; }
+  const {rg,dates,rows}=periodData(), money=anyPrice(), r1=x=>Math.round(x*10)/10;
+  const title="Deliveries from "+(S.main||"Main store")+": "+rangeLabel(S.rMode,rg)+(S.rBranch?" · "+bname(S.rBranch):" · All branches");
+  const H=["Delivered","Pulled out","Pull-out %","Damaged","Damage %","Net"].concat(money?["Amount carried","Amount pulled out","Amount damaged","Net amount"]:[]);
+  const line=t=>[t.sent,t.pulled,r1(pct(t.pulled,t.sent)),t.damaged,r1(pct(t.damaged,t.sent)),t.net].concat(money?[t.vSent,t.vPulled,t.vDamaged,t.vNet]:[]);
+  const T=sum(rows);
+  const gb=group(rows,"bid"), gi=group(rows,"iid");
+  const s1=[[title],[],["Branch","Days"].concat(H)];
+  orderIds(Object.keys(gb),S.branches).forEach(bid=>s1.push([bname(bid),new Set(gb[bid].map(r=>r.date)).size].concat(line(sum(gb[bid])))));
+  s1.push(["TOTAL",new Set(rows.map(r=>r.date)).size].concat(line(T)));
+  const s2=[[title],[],["Item"].concat(money?["Price"]:[]).concat(H)];
+  orderIds(Object.keys(gi),S.items).forEach(iid=>s2.push([iname(iid)].concat(money?[iprice(iid)||""]:[]).concat(line(sum(gi[iid])))));
+  s2.push(["TOTAL"].concat(money?[""]:[]).concat(line(T)));
+  const s3=[["Branch","Item","Delivered","Pulled out","Damaged","Net","Amount carried","Net amount"]];
+  orderIds(Object.keys(gb),S.branches).forEach(bid=>{ const g=group(gb[bid],"iid"); orderIds(Object.keys(g),S.items).forEach(iid=>{ const t=sum(g[iid]); s3.push([bname(bid),iname(iid),t.sent,t.pulled,t.damaged,t.net,t.vSent,t.vNet]); }); });
+  const s4=[["Date","Day","Time","Receipt no.","Branch","Driver","Bread","Price","Delivered","Pulled out","Damaged","Net","Amount carried","Net amount","Notes"]];
+  const s5=[["Date","Time","Receipt no.","Branch","Issued by","Driver","Trip","Pieces delivered","Pulled out","Damaged","Amount carried","Status","Notes"]];
+  dates.forEach(d=>{ const order={};
+    tripsOf(d).forEach(t=>{ if(S.rBranch&&t.bid!==S.rBranch) return; const tt=tripTotals(t); order[t.bid]=(order[t.bid]||0)+(t.void?0:1);
+      s5.push([d,timeTxt(t.time),recNo(t.no),bname(t.bid),t.by||"",t.driver||"",t.void?"":order[t.bid],tt.sent,tt.pulled,tt.damaged,tt.vSent,t.void?"Void":"Issued",t.note||""]);
+      if(t.void) return;
+      orderIds(Object.keys(t.items||{}),S.items).forEach(iid=>{ const q=qtyOf(t.items[iid]), p=priceOf(t.items[iid],iid); if(!(q.sent||q.pulled||q.damaged)) return;
+        s4.push([d,DOW[parse(d).getDay()],timeTxt(t.time),recNo(t.no),bname(t.bid),t.driver||"",iname(iid),p||"",q.sent,q.pulled,q.damaged,q.sent-q.pulled-q.damaged,q.sent*p,(q.sent-q.pulled-q.damaged)*p,t.note||""]); }); }); });
+  const wb=XLSX.utils.book_new();
+  const add=(aoa,name,cols)=>{ const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=cols.map(w=>({wch:w})); XLSX.utils.book_append_sheet(wb,ws,name); };
+  const numCols=[11,11,11,10,10,9,15,15,15,13];
+  if(!S.rBranch) add(s1,"By branch",[24,7].concat(numCols));
+  add(s2,"By item",[24].concat(money?[9]:[]).concat(numCols));
+  add(s3,"Branch x item",[22,22,11,11,10,9,15,13]);
+  if(S.rMode==="year"){ const m=[["Month","Delivered","Pulled out","Damaged","Net"]]; monthRows(dates,rows).forEach(({label,t})=>m.push([label,t.sent,t.pulled,t.damaged,t.net])); add(m,"By month",[12,11,11,10,9]); }
+  const s6=[["Date","Bread","Ready (posted by production)","Delivered","Available left"]];
+  dates.forEach(d=>{ const m=readyMap(d); orderIds(Object.keys(m),S.items).forEach(iid=>{ const x=m[iid]; if(x.ready||x.sent) s6.push([d,iname(iid),x.ready,x.sent,x.ready-x.sent]); }); });
+  if(!S.rBranch) add(s6,"Ready vs delivered",[12,22,14,10,12]);
+  add(s5,"Receipts",[12,9,11,20,16,16,6,10,10,9,14,8,30]);
+  add(s4,"Details",[12,6,9,11,20,16,22,8,10,10,9,8,14,12,30]);
+  const out=XLSX.write(wb,{bookType:"xlsx",type:"array"});
+  const per=S.rMode==="year"?rg[0].slice(0,4):S.rMode==="month"?rg[0].slice(0,7):rg[0]+(rg[1]!==rg[0]?"_to_"+rg[1]:"");
+  const fname="Deliveries_"+per+(S.rBranch?"_"+bname(S.rBranch).replace(/[^\w-]+/g,"_"):"")+".xlsx";
+  claude.use("downloads").then(dl=>{
+    if(!dl){ toast("Downloads are not available in this view."); return; }
+    return dl.save({filename:fname,data:new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})}).then(()=>toast("Excel file ready")).catch(e=>{ if(e&&e.code!=="declined") toast("Could not save the file."); });
+  });
+}
+
+/* ---------- render: setup ---------- */
+function renderSetup(){
+  if(document.activeElement!==$("mainName")) $("mainName").value=S.main||"";
+  const act=activeBranches();
+  $("bList").innerHTML=!act.length?`<div class="empty">No branches yet. Add the first one below.</div>`:
+    act.map((b,i)=>`<div class="list-row b">
+      <input id="bn-${b.id}" value="${esc(b.name)}" data-bid="${b.id}" aria-label="Branch name">
+      <button class="btn up" data-bmove="-1" data-id="${b.id}" ${i===0?"disabled":""} aria-label="Move up">↑</button>
+      <button class="btn up" data-bmove="1" data-id="${b.id}" ${i===act.length-1?"disabled":""} aria-label="Move down">↓</button>
+      <button class="btn danger" data-bdel="${b.id}">${pendingConfirm===b.id?"Tap again":"Remove"}</button></div>`).join("");
+  $("iList").innerHTML=!S.items.length?`<div class="empty">No items yet. Add the first one below.</div>`:
+    `<div class="list-row head"><span>Item</span><span>Price ₱</span><span class="up"></span><span class="up"></span><span></span></div>`+
+    S.items.map((x,i)=>`<div class="list-row">
+      <input id="in-${x.id}" value="${esc(x.name)}" data-edit="name" data-id="${x.id}" aria-label="Item name">
+      <input id="ip-${x.id}" type="number" step="0.01" min="0" inputmode="decimal" value="${x.price||""}" placeholder="₱" data-edit="price" data-id="${x.id}" aria-label="${esc(x.name)} price">
+      <button class="btn up" data-move="-1" data-id="${x.id}" ${i===0?"disabled":""} aria-label="Move up">↑</button>
+      <button class="btn up" data-move="1" data-id="${x.id}" ${i===S.items.length-1?"disabled":""} aria-label="Move down">↓</button>
+      <button class="btn danger" data-del="${x.id}">${pendingConfirm===x.id?"Tap again":"Remove"}</button></div>`).join("");
+}
+
+function render(){
+  if(S.staff){ S.tab="day"; if(S.dDate!==today()){ S.dDate=today(); S.form=null; S.showRec=null; } }
+  ["day","report","setup"].forEach(t=>{ $("view-"+t).hidden=S.tab!==t; $("tab-"+t).setAttribute("aria-selected",S.tab===t); });
+  if(S.tab==="day") renderDay(); else if(S.tab==="report") renderReport(); else renderSetup();
+}
+
+/* ---------- events ---------- */
+const newId=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+document.querySelector("nav").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; S.tab=b.dataset.tab; try{localStorage.setItem(LS+".tab",S.tab)}catch(x){} render(); });
+$("dDate").addEventListener("change",e=>{ if(e.target.value){ S.dDate=e.target.value; renderDay(); } });
+$("dPrev").onclick=()=>{ S.dDate=addDays(S.dDate,-1); renderDay(); };
+$("dNext").onclick=()=>{ S.dDate=addDays(S.dDate,1); renderDay(); };
+$("dToday").onclick=()=>{ S.dDate=today(); renderDay(); };
+$("dBranches").addEventListener("click",e=>{ const b=e.target.closest("[data-branch]"); if(!b) return; S.dBranch=b.dataset.branch; S.form=null; S.showRec=null; renderDay(); });
+$("dBody").addEventListener("input",onFormInput);
+$("dBody").addEventListener("submit",e=>{ e.preventDefault(); if(e.target.id==="tripForm") saveForm(); });
+$("dBody").addEventListener("click",e=>{
+  const b=e.target.closest("button,a"); if(!b) return;
+  const day=S.days[S.dDate]||{}, find=id=>(day.drops||[]).find(x=>x.id===id);
+  if(b.id==="newTrip") return openForm(null);
+  if(b.id==="fCancel"){ S.form=null; pendingConfirm=null; return renderDay(); }
+  if(b.id==="fVoid"){ const id=S.form.id; if(pendingConfirm!=="v:"+id){ pendingConfirm="v:"+id; b.textContent="Tap again to void"; setTimeout(()=>{ if(pendingConfirm==="v:"+id){ pendingConfirm=null; if($("fVoid")) $("fVoid").textContent="Void this receipt"; } },4000); return; } return voidTrip(id); }
+  if(b.dataset.rec){ e.preventDefault(); S.showRec=b.dataset.rec; S.form=null; renderDay(); const el=$("recCard"); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); return; }
+  if(b.id==="recClose"){ S.showRec=null; return renderDay(); }
+  if(b.dataset.edit){ const t=find(b.dataset.edit); if(t) openForm(t); return; }
+  if(b.dataset.recpdf){ const t=find(b.dataset.recpdf); if(t) saveReceipts([t],"Delivery_Receipt_"+recNo(t.no)+"_"+safe(bname(t.bid))+".pdf"); return; }
+  if(b.id==="slipOne") return saveSlips(S.dDate,[S.dBranch]);
+  if(b.id==="recsOne") return saveReceipts(tripsOf(S.dDate,S.dBranch).filter(x=>!x.void),"Delivery_Receipts_"+S.dDate+"_"+safe(bname(S.dBranch))+".pdf");
+});
+$("dReady").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return; const day=S.days[S.dDate]||{};
+  if(b.id==="syncNow") return syncNow();
+  if(b.id==="rCancel"){ S.rform=null; return renderReady(); }
+  if(b.dataset.redit){ const r=(day.ready||[]).find(x=>x.id===b.dataset.redit); if(r) openReady(r); return; }
+  if(b.dataset.rdel){ const id=b.dataset.rdel; if(pendingConfirm!=="r:"+id){ pendingConfirm="r:"+id; renderReady(); setTimeout(()=>{ if(pendingConfirm==="r:"+id){ pendingConfirm=null; renderReady(); } },4000); return; } return removeReady(id); }
+});
+$("dReady").addEventListener("input",e=>{ const f=S.rform, el=e.target; if(!f) return;
+  if(el.id==="rTime") f.time=el.value; else if(el.id==="rBy") f.by=el.value; else if(el.id==="rNote") f.note=el.value; else if(el.dataset.ri) f.items[el.dataset.ri]=el.value; });
+$("dReady").addEventListener("submit",e=>{ e.preventDefault(); if(e.target.id==="readyForm") saveReady(); });
+$("slipAll").onclick=()=>saveSlips(S.dDate,orderIds([...new Set(tripsOf(S.dDate).map(x=>x.bid))],S.branches));
+$("recsAll").onclick=()=>{ const ids=orderIds([...new Set(tripsOf(S.dDate).map(x=>x.bid))],S.branches); saveReceipts(ids.flatMap(b=>tripsOf(S.dDate,b).filter(x=>!x.void)),"Delivery_Receipts_"+S.dDate+"_all_branches.pdf"); };
+$("dAll").addEventListener("click",e=>{ const a=e.target.closest("[data-pick]"); if(!a) return; e.preventDefault(); if(activeBranches().some(b=>b.id===a.dataset.pick)){ S.dBranch=a.dataset.pick; renderDay(); } });
+$("rMode").onchange=e=>{ S.rMode=e.target.value; renderReport(); };
+$("rBranch").onchange=e=>{ S.rBranch=e.target.value; renderReport(); };
+$("rDate").addEventListener("change",e=>{ if(e.target.value){ S.rDate=e.target.value; renderReport(); } });
+$("rPrev").onclick=()=>{ S.rDate=shift(S.rMode,S.rDate,-1); renderReport(); };
+$("rNext").onclick=()=>{ S.rDate=shift(S.rMode,S.rDate,1); renderReport(); };
+$("rExcel").onclick=exportExcel;
+$("rByBranch").addEventListener("click",e=>{ const a=e.target.closest("[data-rbranch]"); if(!a) return; e.preventDefault(); S.rBranch=a.dataset.rbranch; renderReport(); });
+$("rByDay").addEventListener("click",e=>{ const a=e.target.closest("[data-goto]"); if(!a) return; e.preventDefault();
+  if(S.rMode==="year"){ S.rMode="month"; S.rDate=a.dataset.goto; renderReport(); return; }
+  S.dDate=a.dataset.goto; if(S.rBranch) S.dBranch=S.rBranch; S.tab="day"; render(); });
+let editT=null;
+$("mainName").addEventListener("input",e=>{ S.main=e.target.value; clearTimeout(editT); editT=setTimeout(writeSetup,700); });
+$("bAdd").addEventListener("submit",e=>{ e.preventDefault(); const name=$("bName").value.trim(); if(!name) return;
+  S.branches.push({id:newId("br"),name}); $("bName").value=""; $("bName").focus(); renderSetup(); writeSetup(); toast("Added "+name); });
+$("iAdd").addEventListener("submit",e=>{ e.preventDefault(); const name=$("iName").value.trim(); if(!name) return;
+  S.items.push({id:newId("it"),name,price:n($("iPrice").value)}); $("iName").value=""; $("iPrice").value=""; $("iName").focus(); renderSetup(); writeSetup(); toast("Added "+name); });
+$("bList").addEventListener("input",e=>{ const b=S.branches.find(x=>x.id===e.target.dataset.bid); if(!b) return; b.name=e.target.value; clearTimeout(editT); editT=setTimeout(writeSetup,700); });
+$("iList").addEventListener("input",e=>{ const x=S.items.find(i=>i.id===e.target.dataset.id); if(!x) return;
+  if(e.target.dataset.edit==="name") x.name=e.target.value; else x.price=n(e.target.value); clearTimeout(editT); editT=setTimeout(writeSetup,700); });
+function armConfirm(id){ pendingConfirm=id; renderSetup(); setTimeout(()=>{ if(pendingConfirm===id){ pendingConfirm=null; renderSetup(); } },4000); }
+$("bList").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.bmove){ const act=activeBranches(), i=act.findIndex(x=>x.id===b.dataset.id), j=i+Number(b.dataset.bmove);
+    const ai=S.branches.indexOf(act[i]), aj=S.branches.indexOf(act[j]); [S.branches[ai],S.branches[aj]]=[S.branches[aj],S.branches[ai]]; renderSetup(); writeSetup(); return; }
+  if(b.dataset.bdel){ const id=b.dataset.bdel; if(pendingConfirm!==id){ armConfirm(id); return; }
+    const k=S.branches.find(x=>x.id===id); if(k) k.gone=true; pendingConfirm=null; renderSetup(); writeSetup(); toast("Removed "+(k?k.name:"branch")+". Past deliveries stay in reports."); }
+});
+$("iList").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.move){ const i=S.items.findIndex(x=>x.id===b.dataset.id), j=i+Number(b.dataset.move); [S.items[i],S.items[j]]=[S.items[j],S.items[i]]; renderSetup(); writeSetup(); return; }
+  if(b.dataset.del){ const id=b.dataset.del; if(pendingConfirm!==id){ armConfirm(id); return; }
+    const x=S.items.find(i=>i.id===id); S.items=S.items.filter(i=>i.id!==id); pendingConfirm=null; renderSetup(); writeSetup(); toast("Removed "+(x?x.name:"item")+". Past deliveries stay in reports."); }
+});
+
+/* ---------- boot ---------- */
+loadLocal();
+if(window.claude&&claude.use){ S.staff=true; document.body.classList.add("staff"); }
+try{ const t=localStorage.getItem(LS+".tab"); if(t&&["day","report","setup"].includes(t)) S.tab=t; }catch(e){}
+render();
+setSync("Saved on this device");
+
+if(window.claude&&claude.use){
+  if(claude.use) claude.use("user").then(async u=>{
+    if(!u){ S.staff=false; document.body.classList.remove("staff"); render(); return; } let own=false; try{ own=!!(await u.isOwner()); }catch(e){}
+    S.staff=!own; document.body.classList.toggle("staff",S.staff);
+    if(own){ try{ const t=localStorage.getItem(LS+".tab"); if(t&&["day","report","setup"].includes(t)) S.tab=t; }catch(e){} }
+    render();
+  }).catch(()=>{});
+  setInterval(()=>{ if(S.staff&&S.dDate!==today()&&!S.form) render(); },60000);
+  claude.use("db").then(d=>{
+    if(!d){ setSync("Saved on this device only. Sign in to keep it in your account."); return; }
+    db=d; live=true; setSync("Connecting…");
+    let first=true;
+    db.doc("delivery/setup").onSnapshot(snap=>{
+      const data=snap.exists&&snap.data();
+      if(data&&(Array.isArray(data.items)||Array.isArray(data.branches))){ S.main=data.main||"Main store"; S.items=(data.items||[]).map(x=>Object.assign({},x)); S.branches=(data.branches||[]).map(x=>Object.assign({},x)); }
+      else if(first&&(S.items.length||S.branches.length)) writeSetup();
+      first=false; saveLocal();
+      const ae=document.activeElement;
+      if(!(ae&&ae.closest&&(ae.closest("#view-setup")||ae.closest("#dBody")))) render();
+      setSync("Saved");
+    },()=>setSync("Could not reach your account. Changes are kept on this device."));
+    db.collection("delivery/setup/prod").onSnapshot(qs=>{ const m={}; qs.docs.forEach(doc=>{ const v=doc.data(); if(v) m[doc.id]={items:v.items||{}}; }); S.prod=m; renderReadyIfIdle(); },()=>{});
+    db.doc("delivery/sync").onSnapshot(snap=>{ const v=snap.exists&&snap.data(); if(v){ if(S.syncing&&v.at>S.syncing) S.syncing=0; S.sync=v; } renderReadyIfIdle(); },()=>{});
+    let firstDays=true;
+    db.collection("delivery/setup/days").onSnapshot(qs=>{
+      const remote={}; qs.docs.forEach(doc=>{ const v=doc.data(); if(v) remote[doc.id]=normDay(doc.id,v); });
+      if(firstDays){ Object.keys(S.days).forEach(k=>{ const dd=S.days[k]; if(!remote[k]&&dd&&((dd.drops||[]).length||(dd.ready||[]).length)){ remote[k]=dd; writeDay(k); } }); firstDays=false; }
+      dirty.forEach(k=>{ if(S.days[k]) remote[k]=S.days[k]; });
+      const ae=document.activeElement, typing=!!(ae&&ae.closest&&((S.form&&ae.closest("#tripForm"))||(S.rform&&ae.closest("#readyForm"))));
+      S.days=remote; saveLocal();
+      if(!typing) render(); else { renderDayAll(); if(!(S.rform&&ae.closest("#readyForm"))) renderReady(); }
+    },()=>setSync("Could not reach your account. Changes are kept on this device."));
+  });
+}
+})();
+</script>
+
+</body></html>

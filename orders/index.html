@@ -1,0 +1,1071 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><title>Bakery Orders – Online</title><meta name="theme-color" content="#5b3fa6"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"></head><body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<script src="../lib/xlsx.full.min.js"></script>
+<style>
+/* Layout: dispatch board. Sticky header with date + tabs, day tiles, status chips, order tickets that move left to right through the flow. */
+:root{
+  --bg:#f5f4f8; --panel:#ffffff; --sunk:#ecebf2; --line:#dcd9e6; --fg:#1f1b2b; --muted:#6a6479;
+  --accent:#5b3fa6; --accent-ink:#ffffff; --accent-soft:#ebe5f8;
+  --s-new:#5d6478; --s-new-bg:#e9ebf1; --s-packed:#9a5b00; --s-packed-bg:#fbefd9;
+  --s-out:#1f5fbf; --s-out-bg:#e1ecfb; --s-done:#1d7a46; --s-done-bg:#dff3e6;
+  --s-cancel:#b3342b; --s-cancel-bg:#fbe3e1;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#15131c; --panel:#1e1b28; --sunk:#262233; --line:#363047; --fg:#ece9f4; --muted:#a39cb5;
+  --accent:#a68cf0; --accent-ink:#17121f; --accent-soft:#2c2442;
+  --s-new:#b4bacb; --s-new-bg:#2a2d38; --s-packed:#f0b45c; --s-packed-bg:#3a2c14;
+  --s-out:#83b2f5; --s-out-bg:#1a2b45; --s-done:#71d39a; --s-done-bg:#16321f;
+  --s-cancel:#f08a80; --s-cancel-bg:#3d1c1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#15131c; --panel:#1e1b28; --sunk:#262233; --line:#363047; --fg:#ece9f4; --muted:#a39cb5;
+  --accent:#a68cf0; --accent-ink:#17121f; --accent-soft:#2c2442;
+  --s-new:#b4bacb; --s-new-bg:#2a2d38; --s-packed:#f0b45c; --s-packed-bg:#3a2c14;
+  --s-out:#83b2f5; --s-out-bg:#1a2b45; --s-done:#71d39a; --s-done-bg:#16321f;
+  --s-cancel:#f08a80; --s-cancel-bg:#3d1c1a; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.45}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:16px;padding-block:0 48px}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin-inline:-16px;padding:12px 16px 0}
+.toprow{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;justify-content:space-between}
+h1{font-family:var(--f-display);font-weight:800;font-size:1.45rem;margin:0;letter-spacing:-.01em}
+h1 small{display:block;font-family:var(--f-body);font-weight:500;font-size:.78rem;color:var(--muted);letter-spacing:0}
+h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0;text-wrap:balance}
+h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px;font-weight:600}
+.datenav{display:flex;align-items:center;gap:6px}
+.datenav input{width:auto}
+.tabs{display:flex;gap:4px;overflow-x:auto;margin-top:10px}
+.tab{border:0;background:none;color:var(--muted);font:600 .92rem var(--f-body);padding:8px 12px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+button,select,input,textarea{font:inherit;color:inherit}
+input,select,textarea{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%;min-width:0}
+textarea{resize:vertical;min-height:60px}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.ghost{background:none;border-color:transparent;color:var(--muted)}
+.btn.ghost:hover{color:var(--fg)}
+.btn.danger{color:var(--s-cancel)}
+.btn.sm{padding:4px 9px;font-size:.85rem}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.icon{width:34px;padding:6px 0;text-align:center}
+section.view{display:flex;flex-direction:column;gap:18px;padding-top:18px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.tile b{display:block;font-family:var(--f-display);font-size:1.35rem;font-weight:600;font-variant-numeric:tabular-nums}
+.tile span{font-size:.8rem;color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bar .grow{flex:1 1 200px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:4px 11px;font-size:.86rem;cursor:pointer;font-weight:500}
+.chip[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.chip .n{font-family:var(--f-mono);font-size:.78rem;opacity:.75;margin-left:4px}
+.pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:.76rem;font-weight:600;letter-spacing:.02em;white-space:nowrap}
+.st-new{color:var(--s-new);background:var(--s-new-bg)} .st-packed{color:var(--s-packed);background:var(--s-packed-bg)}
+.st-out{color:var(--s-out);background:var(--s-out-bg)} .st-delivered{color:var(--s-done);background:var(--s-done-bg)}
+.st-cancelled{color:var(--s-cancel);background:var(--s-cancel-bg)}
+.pay-ok{color:var(--s-done);background:var(--s-done-bg)} .pay-wait{color:var(--s-packed);background:var(--s-packed-bg)} .pay-hold{color:var(--s-out);background:var(--s-out-bg)}
+.flow{display:flex;gap:4px;align-items:center;font-size:.78rem;color:var(--muted);flex-wrap:wrap}
+.flow i{font-style:normal;width:22px;height:4px;border-radius:2px;background:var(--line)}
+.flow i.on{background:var(--accent)}
+.orders{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.ticket{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.ticket.cancelled{opacity:.65}
+.thead{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.no{font-family:var(--f-mono);font-weight:500;font-size:.95rem}
+.meta{font-size:.8rem;color:var(--muted)}
+.cust{font-weight:600}
+.addr{font-size:.88rem;color:var(--muted);overflow-wrap:anywhere}
+.lines{border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);padding:6px 0;font-size:.9rem;display:grid;gap:2px}
+.line{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
+.line.total{font-weight:600;padding-top:2px}
+.actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.actions select{width:auto;flex:1 1 120px}
+.pick{display:grid;gap:6px;flex:1 1 100%}
+.collect{display:grid;gap:8px;border-top:1px dashed var(--line);padding-top:8px}
+.viewer{position:fixed;inset:0;z-index:30;background:color-mix(in srgb,var(--fg) 55%,transparent);display:grid;place-items:center;padding:16px}
+.vbox{background:var(--panel);border-radius:12px;padding:12px;display:grid;gap:10px;max-width:min(560px,100%);max-height:100%;overflow:auto}
+.vbox img{width:100%;height:auto;border-radius:8px}
+.note{font-size:.86rem;background:var(--sunk);border-radius:6px;padding:4px 8px;overflow-wrap:anywhere}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.form{display:grid;gap:12px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+label.f{display:grid;gap:4px;font-size:.82rem;color:var(--muted);font-weight:500}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg label{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:.9rem;background:var(--panel)}
+.seg input{width:auto;margin:0}
+.seg label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.itemrows{display:grid;gap:6px}
+.irow{display:grid;grid-template-columns:minmax(0,1fr) 150px 140px;gap:8px;align-items:center}
+.irow.on .iname{font-weight:600}
+.stepper{display:flex;align-items:center;gap:2px}
+.stepper input{flex:1 1 auto;min-width:56px;width:56px;text-align:center;padding:6px 2px;font-size:1.05rem;font-weight:600;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.stepper .btn{padding:6px 0;width:38px;flex:none;font-size:1.05rem}
+.price{display:flex;align-items:center;gap:4px;font-size:.85rem;color:var(--muted)}
+.price input{width:84px}
+.formtotal{display:flex;justify-content:space-between;font-weight:600;font-size:1.05rem;border-top:1px solid var(--line);padding-top:10px;font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;background:var(--sunk)}
+td.r,th.r{text-align:right}
+tr:last-child td{border-bottom:0}
+tfoot td{font-weight:600;background:var(--sunk)}
+.empty{border:1px dashed var(--line);border-radius:12px;padding:22px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--fg);margin-bottom:4px}
+.listedit{display:grid;gap:6px}
+.lrow{display:grid;grid-template-columns:minmax(0,1fr) 110px auto;gap:8px;align-items:center}
+.lrow.two{grid-template-columns:minmax(0,1fr) auto}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:.9rem;z-index:20;max-width:calc(100% - 32px)}
+.muted{color:var(--muted)} .small{font-size:.84rem}
+.sync{font-size:.78rem;color:var(--muted)}
+.confirm{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--s-cancel-bg);border-radius:8px;padding:6px 8px;font-size:.86rem}
+@media (max-width:520px){.irow{grid-template-columns:minmax(0,1fr) 150px}.irow .price{grid-column:1/-1;justify-content:flex-end}.lrow{grid-template-columns:minmax(0,1fr) 90px auto}}
+@media (prefers-reduced-motion:no-preference){.ticket{transition:border-color .15s}.ticket:hover{border-color:var(--accent)}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="toprow">
+    <h1 id="storeName">Bakery Orders – Online<small id="subName">Call and message orders, packing, riders, payments</small></h1>
+    <div class="datenav">
+      <button class="btn icon" id="prevDay" aria-label="Previous day">‹</button>
+      <input type="date" id="dayPick" aria-label="Order date">
+      <button class="btn icon" id="nextDay" aria-label="Next day">›</button>
+      <button class="btn sm" id="todayBtn">Today</button>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="orders" aria-selected="true">Orders</button>
+    <button class="tab" role="tab" data-tab="riders" aria-selected="false">Riders &amp; cash</button>
+    <button class="tab mgr" role="tab" data-tab="report" aria-selected="false" hidden>Report</button>
+    <button class="tab mgr" role="tab" data-tab="setup" aria-selected="false" hidden>Breads &amp; riders</button>
+  </nav>
+</header>
+
+<section class="view" id="v-orders">
+  <div class="tiles" id="dayTiles"></div>
+  <div class="bar">
+    <button class="btn primary" id="newOrderBtn">+ New order</button>
+    <input class="grow" type="search" id="search" placeholder="Search name, phone, address, order no.">
+    <span class="sync" id="syncNote"></span>
+  </div>
+  <div class="panel" id="formPanel" hidden></div>
+  <div class="chips" id="statusChips"></div>
+  <div class="orders" id="orderList"></div>
+  <div id="earlierWrap" hidden>
+    <h3 style="margin-top:6px">Still open from earlier days</h3>
+    <div class="orders" id="earlierList"></div>
+  </div>
+</section>
+
+<section class="view" id="v-riders" hidden>
+  <div>
+    <h2>Riders and cash</h2>
+    <p class="muted small" style="margin:4px 0 0">Each rider's tally for the shift: deliveries, cash collected and what they still need to turn in. Pick the collection: 8 AM covers orders sent out before 8 AM, 12 noon covers 8 AM to noon, 6 PM covers noon onward.</p>
+  </div>
+  <div class="bar">
+    <span class="small muted">Shift</span>
+    <div class="chips" id="shiftChips"></div>
+    <label class="price">From<input type="time" id="shFrom" style="width:auto"></label>
+    <label class="price">To<input type="time" id="shTo" style="width:auto"></label>
+  </div>
+  <div id="riderBody"></div>
+</section>
+
+<section class="view" id="v-report" hidden>
+  <div class="bar">
+    <h2 class="grow">Report</h2>
+    <select id="repPeriod" style="width:auto" aria-label="Period">
+      <option value="day">Day</option><option value="week">Week</option><option value="month" selected>Month</option><option value="year">Year</option><option value="custom">Custom</option>
+    </select>
+    <input type="date" id="repFrom" style="width:auto" aria-label="From" hidden>
+    <input type="date" id="repTo" style="width:auto" aria-label="To" hidden>
+    <button class="btn" id="repExcel">Download Excel</button>
+  </div>
+  <div id="repBody"></div>
+</section>
+
+<section class="view" id="v-setup" hidden>
+  <div class="grid2">
+    <div class="panel form">
+      <h2>Store</h2>
+      <label class="f">Store name<input id="setName" placeholder="e.g. Carms Bakery"></label>
+      <label class="f">Usual delivery fee (₱)<input id="setFee" type="number" min="0" step="1" inputmode="decimal"></label>
+      <button class="btn primary" id="saveStore" style="justify-self:start">Save</button>
+    </div>
+    <div class="panel form">
+      <h2>Riders</h2>
+      <div class="listedit" id="riderEdit"></div>
+      <div class="lrow two"><input id="newRider" placeholder="Rider name"><button class="btn" id="addRider">Add</button></div>
+    </div>
+  </div>
+  <div class="panel form">
+    <h2>Breads and prices</h2>
+    <div class="listedit" id="itemEdit"></div>
+    <div class="lrow"><input id="newItem" placeholder="Bread name"><input id="newItemPrice" type="number" min="0" step="0.25" placeholder="Price ₱" inputmode="decimal"><button class="btn" id="addItem">Add</button></div>
+  </div>
+  <p class="muted small">Give this page's address to your order takers, packers and riders. Set a manager PIN (top bar) so only you see Report, past days and this page.</p>
+</section>
+</div>
+<div class="viewer" id="viewer" hidden></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>window.WS_CFG={"app": "ord", "name": "Bakery Orders – Online", "split": [["^days/", {"orders": "map", "collections": "map"}]], "seed": {"app/setup": {"fee": 0, "items": [{"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 0}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}], "name": "", "riders": [{"id": "rmuriv7om3jaj", "name": "jimm"}, {"id": "rmurivq4kxc22", "name": "selo"}, {"id": "rmurivt4bid2y", "name": "anto"}]}}};
+// Shared by the website pages and the Google Sheet script: one saved record per document.
+// A record keeps each piece of a document with the time it last changed, so two phones that
+// change different orders or receipts on the same day both keep their change.
+// rec = {u:{<unit>:{t:<ms>, v:<value>} | {t:<ms>, del:1}}}
+// Unit keys: "f" = whole field f; "f.m.<key>" = one entry of map field f; "f.a.<id>" = one item (by id) of array field f.
+function wsSplitOf(split, path) {
+  for (var i = 0; i < split.length; i++) if (new RegExp(split[i][0]).test(path)) return split[i][1];
+  return {};
+}
+function wsUnits(doc, sp) {
+  var u = {};
+  Object.keys(doc || {}).forEach(function (k) {
+    var v = doc[k];
+    if (sp[k] === 'map' && v && typeof v === 'object' && !Array.isArray(v)) Object.keys(v).forEach(function (s) { u[k + '.m.' + s] = v[s]; });
+    else if (sp[k] === 'arr' && Array.isArray(v)) v.forEach(function (x) { if (x && x.id != null) u[k + '.a.' + x.id] = x; });
+    else u[k] = v;
+  });
+  return u;
+}
+function wsAssemble(rec, sp) {
+  var d = {}, any = false;
+  Object.keys(sp).forEach(function (k) { d[k] = sp[k] === 'arr' ? [] : {}; });
+  Object.keys((rec && rec.u) || {}).forEach(function (key) {
+    var x = rec.u[key]; if (x.del) return; any = true;
+    var m = /^(.*?)\.(m|a)\.(.*)$/.exec(key);
+    if (m && sp[m[1]] === (m[2] === 'm' ? 'map' : 'arr')) { if (m[2] === 'm') d[m[1]][m[3]] = x.v; else d[m[1]].push(x.v); }
+    else d[key] = x.v;
+  });
+  return any ? d : null;
+}
+function wsMerge(a, b) {
+  var out = { u: {} }, au = (a && a.u) || {}, bu = (b && b.u) || {};
+  Object.keys(au).concat(Object.keys(bu)).forEach(function (k) {
+    var x = au[k], y = bu[k];
+    out.u[k] = !x ? y : !y ? x : (y.t > x.t || (y.t === x.t && JSON.stringify(y) > JSON.stringify(x))) ? y : x;
+  });
+  return out;
+}
+// New record after a page writes `doc` (null = deleted) over `rec`.
+function wsStamp(rec, doc, sp, now) {
+  var old = (rec && rec.u) || {}, nu = doc ? wsUnits(doc, sp) : {}, out = { u: {} };
+  Object.keys(old).forEach(function (k) { out.u[k] = old[k]; });
+  Object.keys(nu).forEach(function (k) {
+    var o = old[k];
+    if (!o || o.del || JSON.stringify(o.v) !== JSON.stringify(nu[k])) out.u[k] = { t: Math.max(now, o ? o.t + 1 : 0), v: nu[k] };
+  });
+  Object.keys(old).forEach(function (k) { if (!old[k].del && !(k in nu)) out.u[k] = { t: Math.max(now, old[k].t + 1), del: 1 }; });
+  return out;
+}
+
+/* Website copy: stands in for the Claude account features the app was written for.
+   - db: documents saved in this browser, and shared through the owner's Google Sheet when connected
+   - user: manager (owner) after unlocking with the PIN, staff otherwise
+   - downloads: a normal browser download
+   Expects WS_CFG = {app, name, split:[[regex,{field:'map'|'arr'}]], seed:{path:doc}} before this script. */
+(function () {
+  var C = window.WS_CFG, LS = 'ws.' + C.app, now = function () { return Date.now(); };
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  var clone = function (x) { return x == null ? x : JSON.parse(JSON.stringify(x)); };
+  var sp = function (p) { return wsSplitOf(C.split, p); };
+
+  /* ---------- local store ---------- */
+  var recs = lsGet(LS + '.docs', {}), pend = lsGet(LS + '.pending', {}), sheet = lsGet(LS + '.sheet', ''), since = lsGet(LS + '.since', 0);
+  Object.keys(C.seed || {}).forEach(function (p) { if (!recs[p]) recs[p] = wsStamp(null, C.seed[p], sp(p), 1); });
+  var cache = {};
+  function docOf(p) { if (!(p in cache)) cache[p] = wsAssemble(recs[p], sp(p)); return cache[p]; }
+  function saveAll() { if (!lsSet(LS + '.docs', recs)) status('Could not save. This phone may be out of space.'); lsSet(LS + '.pending', pend); }
+  saveAll();
+  var parent = function (p) { return p.slice(0, p.lastIndexOf('/')); };
+
+  /* ---------- listeners ---------- */
+  var subs = [];
+  function snapDoc(p) { var d = docOf(p); return { id: p.slice(p.lastIndexOf('/') + 1), exists: !!d, data: function () { return clone(d) || undefined; } }; }
+  function runQuery(q) {
+    var out = [];
+    Object.keys(recs).forEach(function (p) {
+      if (parent(p) !== q.coll) return; var d = docOf(p); if (!d) return;
+      for (var i = 0; i < q.where.length; i++) { var w = q.where[i], a = d[w[0]], b = w[2], op = w[1];
+        if (!(op === '==' ? a === b : op === '>=' ? a >= b : op === '<=' ? a <= b : op === '<' ? a < b : op === '>' ? a > b : op === '!=' ? a !== b : false)) return; }
+      out.push(snapDoc(p));
+    });
+    out.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+    return { docs: out, size: out.length, empty: !out.length, forEach: function (f) { out.forEach(f); } };
+  }
+  function changed(paths) {
+    paths.forEach(function (p) { delete cache[p]; });
+    setTimeout(function () {
+      subs.slice().forEach(function (s) {
+        if (s.doc ? paths.indexOf(s.doc) >= 0 : paths.some(function (p) { return parent(p) === s.q.coll; }))
+          try { s.fn(s.doc ? snapDoc(s.doc) : runQuery(s.q)); } catch (e) { console.error(e); }
+      });
+    }, 0);
+  }
+  function write(p, doc) {
+    recs[p] = wsStamp(recs[p], doc, sp(p), now()); pend[p] = 1; saveAll(); changed([p]); queuePush();
+    return Promise.resolve();
+  }
+  function merge(a, b) {
+    for (var k in b) { var v = b[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { if (!a[k] || typeof a[k] !== 'object' || Array.isArray(a[k])) a[k] = {}; merge(a[k], v); }
+      else if (v === undefined) delete a[k]; else a[k] = v; }
+    return a;
+  }
+  function DocRef(p) {
+    return {
+      id: p.slice(p.lastIndexOf('/') + 1), path: p,
+      get: function () { return Promise.resolve(snapDoc(p)); },
+      set: function (d, o) { return write(p, o && o.merge ? merge(clone(docOf(p)) || {}, clone(d)) : clone(d)); },
+      update: function (d) { if (!docOf(p)) return Promise.reject({ code: 'not_found', message: 'Not found' }); return write(p, merge(clone(docOf(p)), clone(d))); },
+      delete: function () { return write(p, null); },
+      onSnapshot: function (fn) { var s = { doc: p, fn: fn }; subs.push(s); setTimeout(function () { fn(snapDoc(p)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; },
+      collection: function (c) { return Coll(p + '/' + c); }
+    };
+  }
+  function Coll(c, where) {
+    var q = { coll: c, where: where || [] };
+    return {
+      doc: function (id) { return DocRef(c + '/' + (id || 'd' + now().toString(36) + Math.random().toString(36).slice(2, 6))); },
+      add: function (d) { var r = DocRef(c + '/d' + now().toString(36) + Math.random().toString(36).slice(2, 6)); return r.set(d).then(function () { return r; }); },
+      where: function (f, op, v) { return Coll(c, q.where.concat([[f, op, v]])); },
+      orderBy: function () { return Coll(c, q.where); }, limit: function () { return Coll(c, q.where); },
+      get: function () { return Promise.resolve(runQuery(q)); },
+      onSnapshot: function (fn) { var s = { q: q, fn: fn }; subs.push(s); setTimeout(function () { fn(runQuery(q)); }, 0); return function () { subs.splice(subs.indexOf(s), 1); }; }
+    };
+  }
+  var DB = { doc: DocRef, collection: function (c) { return Coll(c); } };
+
+  /* ---------- manager PIN ---------- */
+  var PIN = LS + '.pin', UNL = LS + '.unlocked';
+  var pin = function () { return lsGet(PIN, ''); };
+  var unlocked = function () { try { return sessionStorage.getItem(UNL) === '1'; } catch (e) { return false; } };
+  var isMgr = function () { return !pin() || unlocked(); };
+  var USER = { isOwner: function () { return Promise.resolve(isMgr()); }, canEdit: function () { return Promise.resolve(isMgr()); },
+    id: function () { return Promise.resolve(isMgr() ? 'owner' : 'staff'); }, name: function () { return Promise.resolve(isMgr() ? 'Manager' : 'Staff'); } };
+
+  /* ---------- downloads ---------- */
+  var DL = { save: function (o) {
+    var a = document.createElement('a'), u = URL.createObjectURL(o.data instanceof Blob ? o.data : new Blob([o.data]));
+    a.href = u; a.download = o.filename || 'file'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+    return Promise.resolve(); } };
+
+  window.claude = { use: function (n) { return Promise.resolve(n === 'db' ? DB : n === 'user' ? USER : n === 'downloads' ? DL : null); } };
+
+  /* ---------- Google Sheet sharing ---------- */
+  var pushT = null, busy = false, lastOk = 0, err = '';
+  function queuePush() { if (!sheet) return; clearTimeout(pushT); pushT = setTimeout(push, 1200); }
+  function api(params) { return sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + params + '&app=' + C.app + '&t=' + now(); }
+  function push() {
+    var ps = Object.keys(pend); if (!sheet || busy || !ps.length) return;
+    if (!navigator.onLine) { status(''); return; }
+    busy = true; var body = { action: 'docs', app: C.app, docs: {} }; ps.forEach(function (p) { body.docs[p] = recs[p]; });
+    fetch(sheet, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.ok || !(j.v >= 3)) throw new Error(j.error || 'old'); ps.forEach(function (p) { if (JSON.stringify(body.docs[p]) === JSON.stringify(recs[p])) delete pend[p]; }); saveAll(); lastOk = now(); err = ''; })
+      .catch(function (e) { err = e && e.message === 'old' ? 'the Google Sheet script needs updating' : 'could not send to Google Sheet yet'; setTimeout(push, 30000); })
+      .then(function () { busy = false; status(''); if (Object.keys(pend).length && !err) setTimeout(push, 500); });
+  }
+  function pull() {
+    if (!sheet || !navigator.onLine) return Promise.resolve();
+    return fetch(api('action=docs&since=' + since)).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw 0; if (!(j.v >= 3)) { err = 'the Google Sheet script needs updating'; status(''); return; }
+      var ch = [];
+      Object.keys(j.docs || {}).forEach(function (p) { var m = wsMerge(recs[p], j.docs[p]);
+        if (JSON.stringify(m) !== JSON.stringify(recs[p])) { recs[p] = m; ch.push(p); if (JSON.stringify(m) !== JSON.stringify(j.docs[p])) pend[p] = 1; } });
+      since = j.t || since; lsSet(LS + '.since', since); saveAll(); lastOk = now(); err = '';
+      if (ch.length) changed(ch);
+      if (Object.keys(pend).length) push();
+      status('');
+    }).catch(function () { err = 'could not reach Google Sheet'; status(''); });
+  }
+  // Tapping anything fetches the latest first (at most every 2 s), so a new order or receipt number counts the other phones' entries.
+  var lastTap = 0;
+  var tap = function () { if (now() - lastTap > 2000) { lastTap = now(); pull(); } };
+  document.addEventListener('pointerdown', tap, true); document.addEventListener('keydown', tap, true);
+  window.addEventListener('online', function () { push(); pull(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') pull(); });
+  setInterval(function () { if (document.visibilityState === 'visible') pull(); }, 30000);
+
+  /* ---------- bar + panel ---------- */
+  var css = '#wsbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:6px 16px;font:500 13px system-ui,sans-serif;background:#1f2a24;color:#e8efe9}' +
+    '#wsbar button{font:600 13px system-ui,sans-serif;border:1px solid #6d8b77;background:transparent;color:#e8efe9;border-radius:6px;padding:4px 10px;cursor:pointer}' +
+    '#wspanel{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px}' +
+    '#wspanel>div{background:#fff;color:#1a1a1a;border-radius:12px;padding:16px;max-width:460px;width:100%;display:grid;gap:10px;font:15px system-ui,sans-serif;max-height:100%;overflow:auto}' +
+    '#wspanel h3{margin:4px 0 0;font-size:16px}#wspanel p{margin:0;font-size:13px;color:#555}#wspanel .r{display:flex;gap:8px;flex-wrap:wrap}' +
+    '#wspanel input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid #bbb;border-radius:8px;color:#1a1a1a;background:#fff}' +
+    '#wspanel button{font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:8px;border:1px solid #bbb;background:#fff;color:#1a1a1a;cursor:pointer}#wspanel button.p{background:#2f6b3a;border-color:#2f6b3a;color:#fff}';
+  function el(h) { var d = document.createElement('div'); d.innerHTML = h; return d.firstChild; }
+  var bar;
+  function status() {
+    if (!bar) return; var s = bar.querySelector('#wsst');
+    var n = Object.keys(pend).length;
+    s.textContent = !sheet ? 'Saved on this phone only' : err ? 'Saved on this phone · ' + err : n ? (navigator.onLine ? 'Saved on this phone · sending to Google Sheet…' : 'Saved on this phone · will send when online') : 'Shared with Google Sheet' + (lastOk ? ' ' + new Date(lastOk).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  }
+  function toast(t) { var x = document.getElementById('wstoast'); if (!x) { x = el('<div id="wstoast" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:9px 16px;border-radius:8px;font:14px system-ui;z-index:60"></div>'); document.body.appendChild(x); } x.textContent = t; x.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(function () { x.hidden = true; }, 2600); }
+  function panel() {
+    var mgr = isMgr(), p = el('<div id="wspanel"><div>' +
+      (mgr ? '' : '<h3>Manager PIN</h3><div class="r"><input id="wspin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN"><button class="p" id="wsgo">Unlock</button></div>') +
+      (mgr ? '<h3>Manager PIN</h3><p>' + (pin() ? 'A PIN is set. Staff see only today until someone unlocks with it. Type a new one to change it.' : 'No PIN yet, so anyone with this page can see past days and reports. Set a PIN only you know.') + '</p><div class="r"><input id="wsnew" type="password" inputmode="numeric" autocomplete="off" placeholder="New PIN"><button class="p" id="wsset">Save PIN</button></div>' +
+        '<h3>Google Sheet</h3><p>' + (sheet ? 'Connected. Entries are shared with your Google Sheet and every phone or computer connected to it.' : 'Not connected. Entries stay only on this phone. Paste the Web app URL from your Google Sheet to share them.') + '</p>' +
+        '<div class="r"><input id="wsurl" placeholder="https://script.google.com/macros/s/…/exec" value="' + (sheet || '').replace(/"/g, '') + '"><button class="p" id="wscon">Connect</button></div>' + (sheet ? '<div class="r"><button id="wsoff">Disconnect this phone</button></div>' : '') : '') +
+      '<div class="r" style="justify-content:flex-end">' + (mgr && pin() ? '<button id="wslock">Lock (staff view)</button>' : '') + '<button id="wsx">Close</button></div></div></div>');
+    document.body.appendChild(p);
+    var q = function (s) { return p.querySelector(s); }, close = function () { p.remove(); };
+    q('#wsx').onclick = close; p.onclick = function (e) { if (e.target === p) close(); };
+    if (q('#wsgo')) { var go = function () { if (q('#wspin').value === pin()) { try { sessionStorage.setItem(UNL, '1'); } catch (e) {} location.reload(); } else toast('Wrong PIN'); };
+      q('#wsgo').onclick = go; q('#wspin').onkeydown = function (e) { if (e.key === 'Enter') go(); }; q('#wspin').focus(); }
+    if (q('#wsset')) q('#wsset').onclick = function () { var v = q('#wsnew').value.trim(); if (v.length < 4) { toast('Use at least 4 digits.'); return; } lsSet(PIN, v); try { sessionStorage.setItem(UNL, '1'); } catch (e) {} toast('PIN saved. Tap Lock before handing the phone to staff.'); close(); render(); };
+    if (q('#wslock')) q('#wslock').onclick = function () { try { sessionStorage.removeItem(UNL); } catch (e) {} location.reload(); };
+    if (q('#wsoff')) q('#wsoff').onclick = function () { if (!confirm('Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.')) return; sheet = ''; lsSet(LS + '.sheet', null); close(); status(); };
+    if (q('#wscon')) q('#wscon').onclick = function () {
+      var v = q('#wsurl').value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { toast('Paste the Web app URL. It starts with https://script.google.com/macros/s/ and ends with /exec'); return; }
+      toast('Connecting…');
+      fetch(v + '?action=ping&t=' + now()).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ok) throw 0; if (!(j.v >= 3)) { toast('Update the script in your Google Sheet first, then connect again.'); return; }
+        sheet = v; lsSet(LS + '.sheet', v); since = 0; lsSet(LS + '.since', 0); Object.keys(recs).forEach(function (p) { pend[p] = 1; }); saveAll();
+        toast('Connected to Google Sheet'); close(); pull().then(push);
+      }).catch(function () { toast('Could not reach that Sheet. Check the link and that access is set to Anyone.'); });
+    };
+  }
+  function render() {
+    if (!bar) { bar = el('<div id="wsbar"><span><b id="wswho"></b> · <span id="wsst"></span></span><button id="wsbtn"></button></div>');
+      document.body.insertBefore(bar, document.body.firstChild); bar.querySelector('#wsbtn').onclick = panel;
+      var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); }
+    bar.querySelector('#wswho').textContent = isMgr() ? 'Manager' : 'Staff';
+    bar.querySelector('#wsbtn').textContent = isMgr() ? 'PIN & Google Sheet' : 'Manager';
+    status();
+  }
+  function boot() { render(); if (sheet) pull().then(push); }
+  if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  try { if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js'); } catch (e) {}
+})();
+</script>
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const peso = n => "₱" + (Math.round((+n||0)*100)/100).toLocaleString("en-PH",{maximumFractionDigits:2});
+const ymd = d => d.toLocaleDateString("en-CA");
+const addDays = (s, n) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return ymd(d); };
+const nice = s => new Date(s + "T12:00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"});
+const hm = t => t ? new Date(t).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}) : "";
+const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const ls = { get(k,d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch{ return d; } }, set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} } };
+
+const STATUS = { new:"New", packed:"Packed, ready", out:"With rider", delivered:"✓ Delivered successfully", cancelled:"Cancelled" };
+const FLOW = ["new","packed","out","delivered"];
+const PAY = { cod:"Cash on delivery", gcash:"GCash", maya:"Maya" };
+
+let db = null, manager = !window.claude?.use, mode = "local";
+let setup = { name:"", fee:0, items:[], riders:[] };
+let days = {};            // date -> {date, orders:{}}
+let day = ymd(new Date());
+let tab = ls.get("breadorders.tab", "orders");
+let filter = "all", search = "";
+let editing = null;       // {date,id} or "new"
+let unsubDays = null;
+let confirmCancel = null;
+
+function toast(msg){ const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2200); }
+
+/* ---------- data ---------- */
+const LKEY = "breadorders.v1";
+function localLoad(){ const d = ls.get(LKEY, null); if (d){ setup = d.setup || setup; days = d.days || {}; } }
+function localSave(){ ls.set(LKEY, { setup, days }); }
+function deepMerge(a, b){ for (const k in b){ const v = b[k]; if (v && typeof v === "object" && !Array.isArray(v)){ if (!a[k] || typeof a[k] !== "object") a[k] = {}; deepMerge(a[k], v); } else a[k] = v; } return a; }
+
+async function writeDayFields(date, fields){
+  if (mode === "local"){
+    days[date] = days[date] || { date, orders:{} };
+    deepMerge(days[date], fields); localSave(); renderAll(); return true;
+  }
+  const ref = db.doc("days/" + date);
+  try {
+    if (days[date]) await ref.update(fields);
+    else {
+      const snap = await ref.get();
+      if (snap.exists) await ref.update(fields);
+      else await ref.set({ date, orders:{}, ...fields });
+    }
+    return true;
+  } catch (e) { toast("Could not save: " + (e?.code === "permission_denied" ? "you don't have access to change orders" : (e?.message || "try again"))); return false; }
+}
+const writeDay = (date, ordersPatch) => writeDayFields(date, { orders: ordersPatch });
+const patchOrder = (date, id, patch) => writeDay(date, { [id]: patch });
+
+async function saveSetup(){
+  if (mode === "local"){ localSave(); renderAll(); return; }
+  try { await db.doc("app/setup").set({ ...setup, updatedAt: Date.now() }); toast("Saved"); }
+  catch (e) { toast("Could not save: " + (e?.message || "try again")); }
+}
+
+function subscribeDays(){
+  if (mode !== "db") return;
+  if (unsubDays) unsubDays();
+  const from = addDays(day, -6);
+  unsubDays = db.collection("days").where("date", ">=", from).where("date", "<=", day).onSnapshot(snap => {
+    const next = {};
+    snap.docs.forEach(d => { const v = d.data(); if (v) next[d.id] = v; });
+    days = next; $("#syncNote").textContent = ""; renderAll();
+  }, e => { $("#syncNote").textContent = "Live updates stopped. Reload the page."; });
+}
+
+/* ---------- helpers ---------- */
+const activeItems = () => setup.items.filter(i => !i.gone);
+const activeRiders = () => setup.riders.filter(r => !r.gone);
+const riderName = id => (setup.riders.find(r => r.id === id) || {}).name || "—";
+const subtotal = o => (o.items || []).reduce((s, l) => s + (+l.qty||0) * (+l.price||0), 0);
+const total = o => subtotal(o) + (+o.fee||0);
+function payState(o){
+  const p = o.pay || {};
+  if (o.status === "cancelled") return { cls:"st-new", txt: PAY[p.m] || "—" };
+  if (p.m === "cod"){
+    if (!p.paid) return { cls:"pay-wait", txt:"COD · not collected" };
+    if (!o.remit) return { cls:"pay-hold", txt:"COD · rider has cash" };
+    return { cls:"pay-ok", txt:"COD · turned in" };
+  }
+  return p.paid ? { cls:"pay-ok", txt: PAY[p.m] + " · paid" } : { cls:"pay-wait", txt: PAY[p.m] + " · waiting payment" };
+}
+function ordersOf(date){ const d = days[date]; return d ? Object.entries(d.orders || {}).map(([id, o]) => ({ ...o, id, date })) : []; }
+function allLoaded(){ return Object.keys(days).flatMap(ordersOf); }
+function isOpen(o){ if (o.status === "cancelled") return false; if (o.status !== "delivered") return true; return !o.pay?.paid || (o.pay?.m === "cod" && !o.remit); }
+
+/* ---------- render: orders ---------- */
+function renderTiles(list){
+  const live = list.filter(o => o.status !== "cancelled");
+  const sales = live.reduce((s,o) => s + total(o), 0);
+  const paid = live.filter(o => o.pay?.paid).reduce((s,o) => s + total(o), 0);
+  const unpaid = sales - paid;
+  const toGo = live.filter(o => o.status !== "delivered").length;
+  $("#dayTiles").innerHTML = [
+    [live.length, `Orders${toGo ? ` · ${toGo} not delivered` : ""}`],
+    [peso(sales), "Total sales"],
+    [peso(paid), "Paid or collected"],
+    [peso(unpaid), "Not paid yet"],
+  ].map(([b,s]) => `<div class="tile"><b>${b}</b><span>${s}</span></div>`).join("");
+}
+
+function ticket(o){
+  const ps = payState(o);
+  const step = FLOW.indexOf(o.status);
+  const flow = o.status === "cancelled" ? "" : `<div class="flow" aria-label="Progress">${FLOW.map((s,i) => `<i class="${i <= step ? "on" : ""}"></i>`).join("")}<span style="margin-left:4px">${o.times?.[o.status] ? STATUS[o.status] + " " + hm(o.times[o.status]) : ""}</span></div>`;
+  const lines = (o.items || []).map(l => `<div class="line"><span>${l.qty} × ${esc(l.name)}</span><span>${peso(l.qty * l.price)}</span></div>`).join("");
+  const fee = +o.fee ? `<div class="line muted"><span>Delivery fee</span><span>${peso(o.fee)}</span></div>` : "";
+  const key = `${o.date}|${o.id}`;
+  let act = "";
+  const req = o.status !== "cancelled" && o.status !== "delivered" && o.cancelReq?.at ? o.cancelReq : null;
+  if (confirmCancel === key){
+    act = `<div class="confirm" style="display:grid;gap:6px;flex:1 1 100%"><b>${manager ? "Cancel" : "Ask the owner to cancel"} order #${o.no}</b>
+      <label class="f">Reason (required)<input data-creason placeholder="e.g. customer changed mind, wrong address, no stock"></label>
+      ${manager ? "" : `<label class="f">Your name<input data-cby value="${esc(ls.get("breadorders.taker", ""))}"></label>`}
+      <div class="actions"><button class="btn sm danger" data-act="cancel-yes">${manager ? "Cancel order" : "Send for approval"}</button><button class="btn sm" data-act="cancel-no">Keep order</button></div></div>`;
+  } else if (req && manager){
+    act = `<button class="btn sm danger" data-act="cancel-approve">Approve cancel</button><button class="btn sm primary" data-act="cancel-reject">Keep order</button>`;
+  } else if (o.status === "new"){
+    act = `<button class="btn sm primary" data-act="packed">Mark packed</button><button class="btn sm" data-act="edit">Edit</button>`;
+  } else if (o.status === "packed"){
+    const busy = new Set(allLoaded().filter(x => x.status === "out").map(x => x.rider));
+    const rs = activeRiders().slice().sort((a,b) => busy.has(a.id) - busy.has(b.id));
+    act = rs.length
+      ? `<div class="pick"><span class="small muted">Ready. Who is free to deliver?</span><div class="actions">${rs.map(r => `<button class="btn sm ${busy.has(r.id) ? "" : "primary"}" data-act="out" data-r="${r.id}">${esc(r.name)}${busy.has(r.id) ? " (on a delivery)" : ""}</button>`).join("")}</div></div><button class="btn sm" data-act="edit">Edit</button><button class="btn sm ghost" data-act="back">Undo</button>`
+      : `<span class="small muted">No riders yet.</span>${manager ? `<button class="btn sm primary" data-act="gosetup">Add riders</button>` : `<span class="small muted">Ask the owner to add riders.</span>`}<button class="btn sm ghost" data-act="back">Undo</button>`;
+  } else if (o.status === "out"){
+    act = o.pay?.m === "cod" && !o.pay?.paid
+      ? `<button class="btn sm primary" data-act="deliv-paid">Delivered successfully, cash collected</button><button class="btn sm" data-act="deliv">Delivered successfully, not paid yet</button><button class="btn sm ghost" data-act="back">Undo</button>`
+      : `<button class="btn sm primary" data-act="deliv">Delivered successfully</button><button class="btn sm ghost" data-act="back">Undo</button>`;
+  } else if (o.status === "delivered"){
+    if (!o.pay?.paid) act += `<button class="btn sm primary" data-act="paid">${o.pay?.m === "cod" ? "Cash collected" : "Mark paid"}</button>`;
+    if (o.pay?.m === "cod" && o.pay?.paid && !o.remit) act += `<button class="btn sm primary" data-act="remit">Cash turned in</button>`;
+    act += `<button class="btn sm ghost" data-act="back">Undo</button>`;
+  } else if (o.status === "cancelled"){
+    act = manager ? `<button class="btn sm" data-act="restore">Restore order</button>` : "";
+  }
+  if (req && !manager && confirmCancel !== key) act = `<span class="small muted" style="flex:1 1 100%">Waiting for the owner to approve the cancel. Keep working on this order until then.</span>` + act;
+  if (!req && confirmCancel !== key && ["new","packed","out"].includes(o.status)) act += `<button class="btn sm ghost danger" data-act="cancel">${manager ? "Cancel" : "Request cancel"}</button>`;
+  if ((o.status === "out" || o.status === "delivered") && o.pay?.m === "cod" && !o.pay?.paid && confirmCancel !== key){
+    act += `<div class="pick"><span class="small muted">Customer paid the order taker instead?</span><div class="actions"><input data-eref placeholder="Reference no." style="flex:1 1 120px;width:auto"><button class="btn sm" data-act="epay" data-m="gcash">Paid by GCash</button><button class="btn sm" data-act="epay" data-m="maya">Paid by Maya</button></div></div>`;
+  }
+  return `<article class="ticket ${o.status}" data-key="${key}">
+    <div class="thead"><div><span class="no">#${o.no}</span> <span class="meta">${o.date !== day ? nice(o.date) + " · " : ""}${hm(o.t)} · ${o.src === "msg" ? "Message" : "Call"}${o.taker ? " · " + esc(o.taker) : ""}</span></div><span class="pill st-${o.status}">${STATUS[o.status]}</span></div>
+    <div><div class="cust">${esc(o.cust || "No name")}</div>${o.phone ? `<div class="addr">${esc(o.phone)}</div>` : ""}${o.addr ? `<div class="addr">${esc(o.addr)}</div>` : ""}</div>
+    <div class="lines">${lines || `<span class="muted small">No items</span>`}${fee}<div class="line total"><span>Total</span><span>${peso(total(o))}</span></div></div>
+    <div class="bar"><span class="pill ${ps.cls}">${ps.txt}</span>${o.pay?.ref ? `<span class="small muted">Ref ${esc(o.pay.ref)}</span>` : ""}${o.rider ? `<span class="small">Rider: <b>${esc(riderName(o.rider))}</b></span>` : ""}</div>
+    ${o.note ? `<div class="note">${esc(o.note)}</div>` : ""}
+    ${req ? `<div class="confirm"><b>Cancel requested</b> by ${esc(req.by || "staff")} at ${hm(req.at)}. Reason: ${esc(req.reason)}</div>` : ""}
+    ${o.status === "cancelled" && o.cancel?.reason ? `<div class="note"><b>Cancelled:</b> ${esc(o.cancel.reason)}<br><span class="small muted">Asked by ${esc(o.cancel.by || "owner")}${o.cancel.approvedAt ? ", approved by owner " + hm(o.cancel.approvedAt) : ""}</span></div>` : ""}
+    ${flow}
+    <div class="actions">${act}${o.pay?.m && o.pay.m !== "cod" && o.status !== "cancelled" ? `${o.rcpt ? `<button class="btn sm" data-act="viewrc">View receipt</button>` : ""}<label class="btn sm ${o.rcpt ? "ghost" : ""}">${o.rcpt ? "Replace receipt" : "Upload receipt"}<input type="file" accept="image/*" data-rcfile hidden></label>` : ""}<button class="btn sm ghost" data-act="copy" title="Copy order details to send to the rider">Copy</button></div>
+  </article>`;
+}
+
+function matches(o){
+  if (!search) return true;
+  const q = search.toLowerCase();
+  return [o.cust, o.phone, o.addr, "#" + o.no, String(o.no), o.note].some(v => String(v || "").toLowerCase().includes(q));
+}
+
+function renderOrders(){
+  const list = ordersOf(day).sort((a,b) => a.no - b.no);
+  renderTiles(list);
+  const counts = { all: list.length }; Object.keys(STATUS).forEach(s => counts[s] = list.filter(o => o.status === s).length);
+  $("#statusChips").innerHTML = ["all", ...Object.keys(STATUS)].map(s => `<button class="chip" data-f="${s}" aria-pressed="${filter === s}">${s === "all" ? "All" : STATUS[s]}<span class="n">${counts[s]}</span></button>`).join("");
+  const reqs = list.filter(o => o.cancelReq?.at && o.status !== "cancelled" && o.status !== "delivered").length;
+  if (reqs) $("#statusChips").innerHTML += `<button class="chip" data-f="req" aria-pressed="${filter === "req"}" style="border-color:var(--s-cancel);color:var(--s-cancel)">Cancel requests<span class="n">${reqs}</span></button>`;
+  const shown = list.filter(o => (filter === "all" || (filter === "req" ? (o.cancelReq?.at && o.status !== "cancelled" && o.status !== "delivered") : o.status === filter)) && matches(o));
+  $("#orderList").innerHTML = shown.length ? shown.map(ticket).join("")
+    : list.length ? `<div class="empty">No orders match.</div>`
+    : `<div class="empty"><b>No orders for ${nice(day)} yet</b>Tap “+ New order” when a customer calls or sends a message. Each order then moves through Packed, With rider and Delivered.</div>`;
+  const earlier = Object.keys(days).filter(d => d < day).sort().flatMap(ordersOf).filter(o => isOpen(o) && matches(o));
+  $("#earlierWrap").hidden = !earlier.length || day !== ymd(new Date());
+  $("#earlierList").innerHTML = earlier.map(ticket).join("");
+}
+
+/* ---------- order form ---------- */
+function renderForm(){
+  const p = $("#formPanel");
+  if (!editing){ p.hidden = true; p.innerHTML = ""; return; }
+  const o = editing === "new" ? { src:"call", items:[], fee: setup.fee || 0, pay:{ m:"cod", paid:false }, taker: ls.get("breadorders.taker", "") } : { ...ordersOf(editing.date).find(x => x.id === editing.id) };
+  const qty = {}; const price = {};
+  (o.items || []).forEach(l => { qty[l.id] = l.qty; price[l.id] = l.price; });
+  const items = [...activeItems()];
+  (o.items || []).forEach(l => { if (!items.find(i => i.id === l.id)) items.push({ id:l.id, name:l.name, price:l.price }); });
+  p.hidden = false;
+  p.innerHTML = `<form class="form" id="orderForm" autocomplete="off">
+    <div class="bar"><h2 class="grow">${editing === "new" ? "New order" : "Edit order #" + o.no}</h2><button type="button" class="btn ghost" id="closeForm">Close</button></div>
+    <div class="grid2">
+      <div class="f"><span class="small muted">Order came by</span><div class="seg">
+        <label><input type="radio" name="src" value="call" ${o.src !== "msg" ? "checked" : ""}>Call</label>
+        <label><input type="radio" name="src" value="msg" ${o.src === "msg" ? "checked" : ""}>Message</label></div></div>
+      <label class="f">Taken by<input id="fTaker" value="${esc(o.taker)}" placeholder="Your name"></label>
+    </div>
+    <div class="grid2">
+      <label class="f">Customer name<input id="fCust" value="${esc(o.cust)}" required></label>
+      <label class="f">Phone<input id="fPhone" value="${esc(o.phone)}" inputmode="tel"></label>
+    </div>
+    <label class="f">Delivery address and landmark<textarea id="fAddr" rows="2">${esc(o.addr)}</textarea></label>
+    <div><h3>Breads</h3>
+      <div class="itemrows">${items.length ? items.map(i => `<div class="irow ${qty[i.id] ? "on" : ""}" data-item="${i.id}">
+        <span class="iname">${esc(i.name)}</span>
+        <div class="stepper"><button type="button" class="btn" data-step="-1" aria-label="Less ${esc(i.name)}">−</button><input id="q_${i.id}" type="number" min="0" step="1" inputmode="numeric" value="${qty[i.id] || ""}" placeholder="0" aria-label="Quantity ${esc(i.name)}"><button type="button" class="btn" data-step="1" aria-label="More ${esc(i.name)}">+</button></div>
+        <label class="price">₱<input id="p_${i.id}" type="number" min="0" step="0.25" inputmode="decimal" value="${price[i.id] ?? i.price ?? 0}" aria-label="Price each ${esc(i.name)}">each</label>
+      </div>`).join("") : `<div class="empty">No breads yet. ${manager ? "Add them in Breads &amp; riders." : "Ask the owner to add breads."}</div>`}</div>
+    </div>
+    <div class="grid2">
+      <label class="f">Delivery fee (₱)<input id="fFee" type="number" min="0" step="1" inputmode="decimal" value="${+o.fee || 0}"></label>
+      <label class="f">Note<input id="fNote" value="${esc(o.note)}" placeholder="e.g. deliver before 6 AM"></label>
+    </div>
+    <div class="f"><span class="small muted">Payment</span><div class="seg">
+      ${Object.entries(PAY).map(([k,v]) => `<label><input type="radio" name="pm" value="${k}" ${o.pay?.m === k ? "checked" : ""}>${k === "cod" ? "Cash, rider collects" : v + " to order taker"}</label>`).join("")}
+    </div></div>
+    <div class="grid2" id="eRow" ${o.pay?.m === "cod" ? "hidden" : ""}>
+      <label class="f">Reference no.<input id="fRef" value="${esc(o.pay?.ref)}" placeholder="From the GCash or Maya receipt"></label>
+      <div class="seg" style="align-self:end"><label><input type="checkbox" id="fPaid" ${o.pay?.m !== "cod" && o.pay?.paid ? "checked" : ""}>Payment received</label></div>
+    </div>
+    <div class="formtotal"><span>Total</span><span id="fTotal">₱0</span></div>
+    <div class="bar"><button class="btn primary" type="submit">${editing === "new" ? "Save order" : "Save changes"}</button><button type="button" class="btn ghost" id="cancelForm">Close without saving</button></div>
+  </form>`;
+  formTotal();
+}
+function formTotal(){
+  let s = 0;
+  document.querySelectorAll("#orderForm .irow").forEach(r => { const id = r.dataset.item; const q = +$("#q_" + id).value || 0; s += q * (+$("#p_" + id).value || 0); r.classList.toggle("on", q > 0); });
+  s += +($("#fFee")?.value) || 0;
+  const t = $("#fTotal"); if (t) t.textContent = peso(s);
+}
+async function submitForm(e){
+  e.preventDefault();
+  const f = $("#orderForm");
+  const items = [];
+  f.querySelectorAll(".irow").forEach(r => { const id = r.dataset.item; const q = Math.max(0, Math.round(+$("#q_" + id).value || 0)); if (q) items.push({ id, name: r.querySelector(".iname").textContent, qty: q, price: +$("#p_" + id).value || 0 }); });
+  if (!items.length){ toast("Add at least one bread"); return; }
+  const m = f.querySelector('input[name="pm"]:checked')?.value || "cod";
+  const taker = $("#fTaker").value.trim(); ls.set("breadorders.taker", taker);
+  const base = { src: f.querySelector('input[name="src"]:checked')?.value || "call", taker, cust: $("#fCust").value.trim(), phone: $("#fPhone").value.trim(), addr: $("#fAddr").value.trim(), items, fee: +$("#fFee").value || 0, note: $("#fNote").value.trim() };
+  if (editing === "new"){
+    const nos = ordersOf(day).map(o => +o.no || 0);
+    const id = uid("o"); const no = (nos.length ? Math.max(...nos) : 0) + 1;
+    const paid = m !== "cod" && $("#fPaid").checked;
+    const t = Date.now();
+    await writeDay(day, { [id]: { ...base, no, t, status:"new", times:{ new:t }, rider:"", remit:false, pay:{ m, paid, ref: m === "cod" ? "" : $("#fRef").value.trim(), at: paid ? t : 0 } } });
+    toast(`Order #${no} saved`);
+  } else {
+    const o = ordersOf(editing.date).find(x => x.id === editing.id);
+    const wasPaid = !!o?.pay?.paid;
+    const paid = m === "cod" ? (o?.pay?.m === "cod" && wasPaid) : $("#fPaid").checked;
+    await patchOrder(editing.date, editing.id, { ...base, pay:{ m, paid, ref: m === "cod" ? "" : $("#fRef").value.trim(), at: paid ? (o?.pay?.at || Date.now()) : 0 } });
+    toast(`Order #${o?.no} updated`);
+  }
+  editing = null; renderForm();
+}
+
+/* ---------- receipts ---------- */
+function shrink(file){
+  return new Promise((res, rej) => {
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url);
+      let max = 1000, q = 0.7, out = "";
+      for (let i = 0; i < 6; i++){
+        const k = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        out = c.toDataURL("image/jpeg", q); if (out.length < 180000) break; max = Math.round(max * 0.8); q = Math.max(0.45, q - 0.07);
+      }
+      res(out); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("That file is not a picture")); };
+    img.src = url;
+  });
+}
+async function uploadReceipt(input){
+  const file = input.files?.[0]; if (!file) return;
+  const card = input.closest(".ticket"); const [date, id] = card.dataset.key.split("|");
+  const o = ordersOf(date).find(x => x.id === id); if (!o) return;
+  toast("Uploading receipt…");
+  try {
+    const img = await shrink(file);
+    const rec = { date, no: o.no, img, at: Date.now() };
+    if (mode === "db") await db.doc("receipts/" + id).set(rec);
+    else { try { localStorage.setItem("breadorders.rc." + id, JSON.stringify(rec)); } catch { toast("This device has no room to keep the picture"); return; } }
+    await patchOrder(date, id, { rcpt: true });
+    toast(`Receipt saved for order #${o.no}`);
+  } catch (e) { toast("Could not save the receipt: " + (e?.message || "try again")); }
+}
+async function showReceipt(o){
+  let rec = null;
+  try { rec = mode === "db" ? (await db.doc("receipts/" + o.id).get()).data() : JSON.parse(localStorage.getItem("breadorders.rc." + o.id) || "null"); } catch {}
+  if (!rec?.img){ toast("Receipt picture not found"); return; }
+  const v = $("#viewer");
+  v.innerHTML = `<div class="vbox"><div class="bar"><b class="grow">Order #${o.no} · ${esc(o.cust || "")} · ${PAY[o.pay?.m] || ""}${o.pay?.ref ? " · Ref " + esc(o.pay.ref) : ""}</b><button class="btn sm" id="closeViewer">Close</button></div><img src="${rec.img}" alt="Payment receipt for order ${o.no}"></div>`;
+  v.hidden = false; $("#closeViewer").focus();
+}
+
+/* ---------- ticket actions ---------- */
+async function ticketAction(btn){
+  const card = btn.closest(".ticket"); const [date, id] = card.dataset.key.split("|");
+  const o = ordersOf(date).find(x => x.id === id); if (!o) return;
+  const a = btn.dataset.act; const t = Date.now();
+  const go = (status, extra = {}) => patchOrder(date, id, { status, times:{ [status]: t }, ...extra });
+  if (a === "packed") return go("packed");
+  if (a === "gosetup"){ tab = "setup"; renderAll(); renderSetup(); $("#newRider").focus(); return; }
+  if (a === "edit"){ editing = { date, id }; renderForm(); $("#formPanel").scrollIntoView({ behavior:"smooth", block:"start" }); return; }
+  if (a === "cancel"){ confirmCancel = card.dataset.key; return renderOrders(); }
+  if (a === "cancel-no"){ confirmCancel = null; return renderOrders(); }
+  if (a === "cancel-yes"){
+    const reason = card.querySelector("[data-creason]")?.value.trim();
+    if (!reason){ toast("Type the reason for cancelling"); card.querySelector("[data-creason]")?.focus(); return; }
+    confirmCancel = null;
+    if (manager) return go("cancelled", { cancel:{ reason, by:"Owner", at:t, approvedAt:t }, cancelReq:{ at:0, reason:"", by:"" } });
+    const by = card.querySelector("[data-cby]")?.value.trim() || ""; if (by) ls.set("breadorders.taker", by);
+    toast(`Cancel request sent for order #${o.no}. The owner must approve it.`);
+    return patchOrder(date, id, { cancelReq:{ reason, by, at:t } });
+  }
+  if (a === "cancel-approve"){ if (!manager) return; toast(`Order #${o.no} cancelled`); return go("cancelled", { cancel:{ reason:o.cancelReq.reason, by:o.cancelReq.by, at:o.cancelReq.at, approvedAt:t }, cancelReq:{ at:0, reason:"", by:"" } }); }
+  if (a === "cancel-reject"){ if (!manager) return; toast(`Order #${o.no} kept. Cancel request turned down.`); return patchOrder(date, id, { cancelReq:{ at:0, reason:"", by:"" }, cancelDenied:{ reason:o.cancelReq.reason, by:o.cancelReq.by, at:t } }); }
+  if (a === "restore"){ if (!manager) return; return go("new"); }
+  if (a === "out"){
+    const r = btn.dataset.r; if (!r) return;
+    toast(`Order #${o.no} sent out with ${riderName(r)}`);
+    return go("out", { rider: r });
+  }
+  if (a === "deliv"){ toast(`Order #${o.no} delivered successfully`); return go("delivered"); }
+  if (a === "deliv-paid"){ toast(`Order #${o.no} delivered successfully, cash collected`); return go("delivered", { pay:{ paid:true, at:t } }); }
+  if (a === "viewrc") return showReceipt(o);
+  if (a === "epay"){ const m = btn.dataset.m; const ref = card.querySelector("[data-eref]")?.value.trim() || "";
+    toast(`Order #${o.no} paid by ${PAY[m]}. Rider has no cash to collect for it.`);
+    return patchOrder(date, id, { pay:{ m, paid:true, ref, at:t } }); }
+  if (a === "paid") return patchOrder(date, id, { pay:{ paid:true, at:t } });
+  if (a === "remit") return patchOrder(date, id, { remit:true, remitAt:t });
+  if (a === "back"){
+    if (o.status === "delivered" && (o.remit || o.pay?.paid)){
+      if (o.remit) return patchOrder(date, id, { remit:false, remitAt:0 });
+      if (o.pay?.m === "cod") return patchOrder(date, id, { pay:{ paid:false, at:0 } });
+    }
+    const prev = FLOW[FLOW.indexOf(o.status) - 1]; if (prev) return patchOrder(date, id, prev === "packed" ? { status: prev, rider: "" } : { status: prev });
+  }
+  if (a === "copy"){
+    const txt = [`Order #${o.no} (${nice(o.date)})`, o.cust, o.phone, o.addr, ...(o.items||[]).map(l => `${l.qty} x ${l.name}`), `Total: ${peso(total(o))}`, `Payment: ${payState(o).txt}`, o.note ? `Note: ${o.note}` : ""].filter(Boolean).join("\n");
+    try { await navigator.clipboard.writeText(txt); toast("Copied. Paste it in your chat with the rider."); }
+    catch { toast("Copy is blocked here. Long-press the order text to copy it."); }
+  }
+}
+
+/* ---------- riders ---------- */
+const SHIFTS = { c8:["00:00","07:59","8 AM collection"], c12:["08:00","11:59","12 noon collection"], c18:["12:00","23:59","6 PM collection"], day:["","","Whole day"] };
+const nowShift = () => { const h = hhmm(Date.now()); const k = Object.keys(SHIFTS).find(k => k !== "day" && h >= SHIFTS[k][0] && h <= SHIFTS[k][1]); return { from:SHIFTS[k][0], to:SHIFTS[k][1] }; };
+let shift = null;
+const hhmm = t => { const d = new Date(t); return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); };
+function inShift(o){ const t = o.times?.out || o.t; if (!t) return !shift.from && !shift.to; const h = hhmm(t); return (!shift.from || h >= shift.from) && (!shift.to || h <= shift.to); }
+function shiftLabel(){ const k = Object.keys(SHIFTS).find(k => SHIFTS[k][0] === shift.from && SHIFTS[k][1] === shift.to); return k ? SHIFTS[k][2] : `${shift.from || "start"} to ${shift.to || "end"}`; }
+function riderTally(rid){
+  const mine = ordersOf(day).filter(o => o.rider === rid && o.status !== "cancelled" && (o.status === "out" || o.status === "delivered") && inShift(o)).sort((a,b) => (a.times?.out||0) - (b.times?.out||0));
+  const sum = f => mine.filter(f).reduce((s,o) => s + total(o), 0);
+  const cod = o => o.pay?.m === "cod";
+  const t = {
+    mine, out: mine.filter(o => o.status === "out").length, del: mine.filter(o => o.status === "delivered").length,
+    col: sum(o => cod(o) && o.pay?.paid), rem: sum(o => cod(o) && o.pay?.paid && o.remit),
+    owed: sum(o => cod(o) && !o.pay?.paid && o.status === "out"), unpaid: sum(o => cod(o) && !o.pay?.paid && o.status === "delivered"),
+    epaid: sum(o => !cod(o) && o.pay?.paid), eunpaid: sum(o => !cod(o) && !o.pay?.paid),
+  };
+  t.hold = t.col - t.rem;
+  t.earlier = allLoaded().filter(o => o.rider === rid && o.status !== "cancelled" && cod(o) && o.pay?.paid && !o.remit && !mine.includes(o) && !(o.date === day && mine.some(m => m.id === o.id))).reduce((s,o) => s + total(o), 0);
+  return t;
+}
+function tallyText(rid, t){
+  return [`${riderName(rid)} · ${nice(day)} · ${shiftLabel()}`, `Delivered: ${t.del}${t.out ? `, still out: ${t.out}` : ""}`,
+    ...t.mine.map(o => `#${o.no} ${o.cust || ""} ${peso(total(o))} ${payState(o).txt}`),
+    `Cash collected: ${peso(t.col)}`, `Turned in: ${peso(t.rem)}`, `To turn in: ${peso(t.hold)}`,
+    t.epaid ? `Paid by GCash/Maya (not with rider): ${peso(t.epaid)}` : "", t.unpaid ? `Delivered but not paid: ${peso(t.unpaid)}` : ""].filter(Boolean).join("\n");
+}
+function renderRiders(){
+  if (!shift) shift = nowShift();
+  $("#shiftChips").innerHTML = Object.entries(SHIFTS).map(([k,v]) => `<button class="chip" data-shift="${k}" aria-pressed="${v[0] === shift.from && v[1] === shift.to}">${v[2]}</button>`).join("");
+  $("#shFrom").value = shift.from; $("#shTo").value = shift.to;
+  const ids = [...new Set([...activeRiders().map(r => r.id), ...ordersOf(day).map(o => o.rider).filter(Boolean)])];
+  if (!ids.length){ $("#riderBody").innerHTML = `<div class="empty"><b>No riders yet</b>${manager ? "Add your riders in Breads &amp; riders." : "Ask the owner to add riders."}</div>`; return; }
+  const all = ids.map(rid => [rid, riderTally(rid)]);
+  const T = all.reduce((a, [,t]) => ({ del:a.del + t.del, col:a.col + t.col, rem:a.rem + t.rem, hold:a.hold + t.hold }), { del:0, col:0, rem:0, hold:0 });
+  const card = (rid, t) => `<article class="ticket">
+    <div class="thead"><div><div class="cust">${esc(riderName(rid))}</div><div class="meta">${nice(day)} · ${esc(shiftLabel())}</div></div><span class="pill ${t.hold ? "pay-hold" : t.mine.length ? "pay-ok" : "st-new"}">${t.hold ? peso(t.hold) + " to turn in" : t.mine.length ? "All turned in" : "No deliveries"}</span></div>
+    ${t.mine.length ? `<div class="lines">${t.mine.map(o => `<div class="line"><span>#${o.no} ${esc(o.cust || "")} <span class="muted small">${hm(o.times?.out)}${o.times?.delivered && o.status === "delivered" ? "–" + hm(o.times.delivered) : " · on the way"}</span></span><span>${peso(total(o))} <span class="small muted">${o.pay?.m === "cod" ? (o.pay?.paid ? "cash" : "cash due") : PAY[o.pay?.m]}</span></span></div>`).join("")}</div>
+    <div class="lines" style="border-top:0">
+      <div class="line"><span>Delivered successfully</span><span>${t.del}${t.out ? ` <span class="muted small">(${t.out} still out)</span>` : ""}</span></div>
+      <div class="line"><span>Cash collected</span><span>${peso(t.col)}</span></div>
+      ${t.owed ? `<div class="line muted"><span>Cash to collect on the way</span><span>${peso(t.owed)}</span></div>` : ""}
+      ${t.unpaid ? `<div class="line" style="color:var(--s-cancel)"><span>Delivered but not paid</span><span>${peso(t.unpaid)}</span></div>` : ""}
+      ${t.epaid || t.eunpaid ? `<div class="line muted"><span>GCash / Maya (paid to order taker)</span><span>${peso(t.epaid + t.eunpaid)}</span></div>` : ""}
+      <div class="line"><span>Turned in</span><span>${peso(t.rem)}</span></div>
+      <div class="line total"><span>To turn in</span><span>${peso(t.hold)}</span></div>
+      ${t.earlier ? `<div class="line small" style="color:var(--s-packed)"><span>Also not turned in from other shifts or days</span><span>${peso(t.earlier)}</span></div>` : ""}
+    </div>` : `<p class="small muted" style="margin:0">No orders sent out with this rider in this shift.</p>`}
+    ${t.hold || t.earlier ? `<div class="collect" data-collect="${rid}" data-exp="${t.hold + t.earlier}">
+      <div class="small muted">Collect now · expected <b>${peso(t.hold + t.earlier)}</b></div>
+      <div class="grid2"><label class="f">Cash received (₱)<input type="number" min="0" step="0.25" inputmode="decimal" id="rcv_${rid}" placeholder="${t.hold + t.earlier}"></label>
+      <label class="f">Reason if short or over<input id="rsn_${rid}" placeholder="e.g. customer paid ₱20 less, change"></label></div>
+      <div class="actions"><span class="pill st-new" data-remark>Enter the cash received</span><button class="btn sm primary" data-turnin="${rid}">Record collection</button></div>
+    </div>` : ""}
+    ${collectionsOf(day).filter(c => c.rider === rid).map(c => { const r = remark(c.expected, c.received); return `<div class="note"><b>${hm(c.at)}</b> · ${esc(c.shift)} · expected ${peso(c.expected)}, received ${peso(c.received)} <span class="pill ${r.cls}">${r.txt}</span>${c.reason ? `<br>Reason: ${esc(c.reason)}` : ""}</div>`; }).join("")}
+    <div class="actions">${t.mine.length ? `<button class="btn sm ghost" data-copytally="${rid}">Copy tally</button>` : ""}</div>
+  </article>`;
+  $("#riderBody").innerHTML = `<div class="tiles" style="margin-bottom:12px">
+      <div class="tile"><b>${T.del}</b><span>Delivered successfully</span></div>
+      <div class="tile"><b>${peso(T.col)}</b><span>Cash collected</span></div>
+      <div class="tile"><b>${peso(T.rem)}</b><span>Turned in</span></div>
+      <div class="tile"><b>${peso(T.hold)}</b><span>Still with riders</span></div></div>
+    <div class="orders">${all.sort((a,b) => b[1].mine.length - a[1].mine.length).map(([rid,t]) => card(rid,t)).join("")}</div>
+    ${(() => { const cs = collectionsOf(day); if (!cs.length) return ""; const short = cs.reduce((s,c) => s + Math.min(0, c.diff), 0), over = cs.reduce((s,c) => s + Math.max(0, c.diff), 0);
+      return `<h3 style="margin-top:18px">Collections on ${nice(day)}</h3><div class="tablewrap"><table><thead><tr><th>Time</th><th>Rider</th><th>Shift</th><th class="r">Expected</th><th class="r">Received</th><th>Remark</th><th>Reason</th></tr></thead><tbody>${cs.map(c => { const r = remark(c.expected, c.received); return `<tr><td>${hm(c.at)}</td><td>${esc(riderName(c.rider))}</td><td>${esc(c.shift)}</td><td class="r">${peso(c.expected)}</td><td class="r">${peso(c.received)}</td><td><span class="pill ${r.cls}">${r.txt}</span></td><td style="white-space:normal">${esc(c.reason || "")}</td></tr>`; }).join("")}</tbody>
+      <tfoot><tr><td colspan="3">Total</td><td class="r">${peso(cs.reduce((s,c) => s + c.expected, 0))}</td><td class="r">${peso(cs.reduce((s,c) => s + c.received, 0))}</td><td colspan="2">${short ? "Short " + peso(-short) : ""}${short && over ? " · " : ""}${over ? "Over " + peso(over) : ""}${!short && !over ? "All tally" : ""}</td></tr></tfoot></table></div>`; })()}`;
+}
+function remark(expected, received){
+  const d = Math.round((received - expected) * 100) / 100;
+  if (d === 0) return { cls:"pay-ok", txt:"Tally", d };
+  return d < 0 ? { cls:"st-cancelled", txt:`Short ${peso(-d)}`, d } : { cls:"pay-hold", txt:`Over ${peso(d)}`, d };
+}
+async function turnIn(rid, received, reason){
+  const t = Date.now(); const byDate = {}; let expected = 0; const ids = [];
+  allLoaded().filter(o => o.rider === rid && o.status !== "cancelled" && o.pay?.m === "cod" && o.pay?.paid && !o.remit)
+    .forEach(o => { expected += total(o); ids.push(o.date + "|" + o.id); (byDate[o.date] = byDate[o.date] || {})[o.id] = { remit:true, remitAt:t }; });
+  const cid = uid("c");
+  const rec = { rider: rid, at: t, shift: shiftLabel(), expected, received, diff: Math.round((received - expected) * 100) / 100, reason, orders: ids };
+  const dates = new Set([...Object.keys(byDate), day]);
+  for (const d of dates){
+    const f = {}; if (byDate[d]) f.orders = byDate[d]; if (d === day) f.collections = { [cid]: rec };
+    if (!(await writeDayFields(d, f))) return;
+  }
+  const r = remark(expected, received);
+  toast(`${riderName(rid)}: ${peso(received)} received · ${r.txt}`);
+}
+function collectionsOf(date){ return Object.entries(days[date]?.collections || {}).map(([id, c]) => ({ ...c, id, date })).sort((a,b) => a.at - b.at); }
+
+/* ---------- report ---------- */
+let repData = [], repColl = [];
+function repRange(){
+  const p = $("#repPeriod").value; const d = new Date(day + "T12:00:00");
+  $("#repFrom").hidden = $("#repTo").hidden = p !== "custom";
+  if (p === "day") return [day, day];
+  if (p === "week"){ const dow = (d.getDay() + 6) % 7; const from = addDays(day, -dow); return [from, addDays(from, 6)]; }
+  if (p === "month") return [day.slice(0,8) + "01", ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0, 12))];
+  if (p === "year") return [day.slice(0,4) + "-01-01", day.slice(0,4) + "-12-31"];
+  if (!$("#repFrom").value) $("#repFrom").value = addDays(day, -6);
+  if (!$("#repTo").value) $("#repTo").value = day;
+  return [$("#repFrom").value, $("#repTo").value];
+}
+async function loadReport(){
+  const [from, to] = repRange();
+  $("#repBody").innerHTML = `<p class="muted">Loading ${nice(from)} to ${nice(to)}…</p>`;
+  let docs = [];
+  if (mode === "db"){
+    try { const snap = await db.collection("days").where("date", ">=", from).where("date", "<=", to).get(); docs = snap.docs.map(d => d.data()).filter(Boolean); }
+    catch (e) { $("#repBody").innerHTML = `<div class="empty">Could not load the report. ${esc(e?.message || "")}</div>`; return; }
+  } else docs = Object.values(days).filter(d => d.date >= from && d.date <= to);
+  repData = docs.flatMap(d => Object.entries(d.orders || {}).map(([id, o]) => ({ ...o, id, date: d.date })));
+  repColl = docs.flatMap(d => Object.entries(d.collections || {}).map(([id, c]) => ({ ...c, id, date: d.date }))).sort((a,b) => a.at - b.at);
+  renderReport(from, to);
+}
+function sumBy(list, keyFn){ const m = new Map(); list.forEach(o => { const k = keyFn(o); const r = m.get(k) || { n:0, amt:0 }; r.n++; r.amt += total(o); m.set(k, r); }); return m; }
+function repTables(from, to){
+  const live = repData.filter(o => o.status !== "cancelled");
+  const sales = live.reduce((s,o) => s + total(o), 0);
+  const fees = live.reduce((s,o) => s + (+o.fee||0), 0);
+  const paidAmt = m => live.filter(o => o.pay?.m === m && o.pay?.paid).reduce((s,o) => s + total(o), 0);
+  const unpaid = live.filter(o => !o.pay?.paid).reduce((s,o) => s + total(o), 0);
+  const held = live.filter(o => o.pay?.m === "cod" && o.pay?.paid && !o.remit).reduce((s,o) => s + total(o), 0);
+  const summary = [["Orders", live.length], ["Delivered successfully", live.filter(o => o.status === "delivered").length], ["Cancelled", repData.length - live.length],
+    ["Total sales", sales], ["Of which delivery fees", fees], ["Cash collected by riders", paidAmt("cod")], ["Cash still with riders", held], ["GCash received", paidAmt("gcash")], ["Maya received", paidAmt("maya")], ["Not paid yet", unpaid]];
+  const items = new Map(); live.forEach(o => (o.items||[]).forEach(l => { const r = items.get(l.name) || { q:0, amt:0 }; r.q += +l.qty||0; r.amt += (+l.qty||0) * (+l.price||0); items.set(l.name, r); }));
+  const byItem = [...items].sort((a,b) => b[1].amt - a[1].amt).map(([k,v]) => [k, v.q, v.amt]);
+  const riders = new Map(); live.filter(o => o.rider).forEach(o => { const r = riders.get(o.rider) || { n:0, del:0, col:0, rem:0 }; r.n++; if (o.status === "delivered") r.del++; if (o.pay?.m === "cod" && o.pay?.paid){ r.col += total(o); if (o.remit) r.rem += total(o); } riders.set(o.rider, r); });
+  const byRider = [...riders].map(([k,v]) => [riderName(k), v.n, v.del, v.col, v.rem, v.col - v.rem]);
+  const byPay = [...sumBy(live, o => PAY[o.pay?.m] || "—")].map(([k,v]) => [k, v.n, v.amt]);
+  const bySrc = [...sumBy(live, o => o.src === "msg" ? "Message" : "Call")].map(([k,v]) => [k, v.n, v.amt]);
+  const long = (to.slice(0,7) !== from.slice(0,7)) && $("#repPeriod").value === "year";
+  const byDay = [...sumBy(live, o => long ? o.date.slice(0,7) : o.date)].sort((a,b) => a[0] < b[0] ? -1 : 1).map(([k,v]) => [k, v.n, v.amt]);
+  const details = repData.slice().sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.no - b.no).map(o => [o.date, o.no, hm(o.t), o.src === "msg" ? "Message" : "Call", o.taker || "", o.cust || "", o.phone || "", o.addr || "", (o.items||[]).map(l => `${l.qty} ${l.name}`).join(", "), subtotal(o), +o.fee||0, total(o), STATUS[o.status], riderName(o.rider) === "—" ? "" : riderName(o.rider), PAY[o.pay?.m] || "", o.pay?.paid ? "Yes" : "No", o.pay?.ref || "", o.rcpt ? "Yes" : "", o.pay?.m === "cod" ? (o.remit ? "Yes" : "No") : "", o.note || "", o.cancel?.reason || ""]);
+  const colls = repColl.map(c => [c.date, hm(c.at), riderName(c.rider), c.shift || "", c.expected, c.received, remark(c.expected, c.received).txt, c.reason || ""]);
+  const shortT = repColl.reduce((s,c) => s + Math.min(0, c.diff || 0), 0), overT = repColl.reduce((s,c) => s + Math.max(0, c.diff || 0), 0);
+  summary.push(["Rider collections short", -shortT], ["Rider collections over", overT]);
+  return { summary, byItem, byRider, byPay, bySrc, byDay, details, long, colls };
+}
+function tbl(head, rows, money = [], foot){
+  const cell = (v, i) => `<td class="${typeof v === "number" ? "r" : ""}">${typeof v === "number" ? (money.includes(i) ? peso(v) : v) : esc(v)}</td>`;
+  return `<div class="tablewrap"><table><thead><tr>${head.map((h,i) => `<th class="${i ? "r" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(cell).join("")}</tr>`).join("") || `<tr><td colspan="${head.length}" class="muted">Nothing yet</td></tr>`}</tbody>${foot ? `<tfoot><tr>${foot.map(cell).join("")}</tr></tfoot>` : ""}</table></div>`;
+}
+function renderReport(from, to){
+  const T = repTables(from, to);
+  if (!repData.length){ $("#repBody").innerHTML = `<div class="empty"><b>No orders from ${nice(from)} to ${nice(to)}</b>Orders you add on the Orders tab show up here.</div>`; return; }
+  const money = new Set(["Rider collections short","Rider collections over","Total sales","Of which delivery fees","Cash collected by riders","Cash still with riders","GCash received","Maya received","Not paid yet"]);
+  $("#repBody").innerHTML = `
+    <p class="muted small" style="margin:0">${nice(from)} to ${nice(to)}. Cancelled orders are left out of the money totals.</p>
+    <div class="tiles">${T.summary.map(([k,v]) => `<div class="tile"><b>${money.has(k) ? peso(v) : v}</b><span>${k}</span></div>`).join("")}</div>
+    <div class="grid2"><div><h3>By payment</h3>${tbl(["Payment","Orders","Amount"], T.byPay, [2])}</div><div><h3>Call or message</h3>${tbl(["Came by","Orders","Amount"], T.bySrc, [2])}</div></div>
+    <div><h3>By rider</h3>${tbl(["Rider","Orders","Delivered","Cash collected","Turned in","Not turned in"], T.byRider, [3,4,5])}</div>
+    <div><h3>Cancelled orders</h3>${tbl(["Date","No.","Customer","Amount","Reason","Asked by"], repData.filter(o => o.status === "cancelled").map(o => [o.date, o.no, o.cust || "", total(o), o.cancel?.reason || "(no reason recorded)", o.cancel?.by || ""]), [3])}</div>
+    <div><h3>Cash collections from riders</h3>${tbl(["Date","Time","Rider","Shift","Expected","Received","Remark","Reason"], T.colls, [4,5])}</div>
+    <div><h3>By bread</h3>${tbl(["Bread","Qty","Amount"], T.byItem, [2], ["Total", T.byItem.reduce((s,r) => s + r[1], 0), T.byItem.reduce((s,r) => s + r[2], 0)])}</div>
+    <div><h3>${T.long ? "By month" : "By day"}</h3>${tbl([T.long ? "Month" : "Date","Orders","Amount"], T.byDay, [2])}</div>`;
+}
+async function downloadExcel(){
+  if (!repData.length){ toast("No orders in this period"); return; }
+  if (!window.XLSX){ toast("Excel tool did not load. Reload the page."); return; }
+  const [from, to] = repRange(); const T = repTables(from, to); const X = XLSX.utils;
+  const wb = X.book_new();
+  const add = (name, rows) => { const ws = X.aoa_to_sheet(rows); ws["!cols"] = rows[0].map((_, i) => ({ wch: Math.min(40, Math.max(10, ...rows.map(r => String(r[i] ?? "").length + 2))) })); X.book_append_sheet(wb, ws, name); };
+  add("Summary", [[`${setup.name || "Bakery Orders – Online"} report`, `${from} to ${to}`], [], ["Item","Value"], ...T.summary]);
+  add("By payment", [["Payment","Orders","Amount"], ...T.byPay, [], ["Came by","Orders","Amount"], ...T.bySrc]);
+  add("By rider", [["Rider","Orders","Delivered","Cash collected","Turned in","Not turned in"], ...T.byRider]);
+  add("By bread", [["Bread","Qty","Amount"], ...T.byItem]);
+  add("Collections", [["Date","Time","Rider","Shift","Expected","Received","Remark","Reason"], ...T.colls]);
+  add(T.long ? "By month" : "By day", [[T.long ? "Month" : "Date","Orders","Amount"], ...T.byDay]);
+  add("Orders", [["Date","No.","Time","Came by","Taken by","Customer","Phone","Address","Breads","Subtotal","Delivery fee","Total","Status","Rider","Payment","Paid","Reference","Receipt photo","Cash turned in","Note","Cancel reason"], ...T.details]);
+  const buf = XLSX.write(wb, { bookType:"xlsx", type:"array" });
+  const dl = await window.claude?.use?.("downloads").catch(() => null);
+  if (!dl){ toast("Downloads are not available in this view"); return; }
+  try { await dl.save({ filename:`Bakery orders online ${from} to ${to}.xlsx`, data: new Blob([buf]) }); }
+  catch (e) { if (e?.code !== "declined") toast("Could not save the file: " + (e?.message || e?.code)); }
+}
+
+/* ---------- setup ---------- */
+function renderSetup(){
+  $("#setName").value = setup.name || ""; $("#setFee").value = setup.fee || 0;
+  $("#itemEdit").innerHTML = activeItems().map(i => `<div class="lrow" data-iid="${i.id}"><input value="${esc(i.name)}" data-k="name" aria-label="Bread name"><input type="number" min="0" step="0.25" value="${i.price || 0}" data-k="price" aria-label="Price" inputmode="decimal"><button class="btn sm ghost danger" data-rm>Remove</button></div>`).join("") || `<p class="muted small">No breads yet.</p>`;
+  $("#riderEdit").innerHTML = activeRiders().map(r => `<div class="lrow two" data-rid="${r.id}"><input value="${esc(r.name)}" aria-label="Rider name"><button class="btn sm ghost danger" data-rm>Remove</button></div>`).join("") || `<p class="muted small">No riders yet.</p>`;
+}
+
+/* ---------- shell ---------- */
+function renderHeader(){
+  $("#subName").textContent = (setup.name ? setup.name + " · " : "") + "Call and message orders, packing, riders, payments";
+  $("#dayPick").value = day;
+  $(".datenav").hidden = !manager;
+  document.querySelectorAll(".mgr").forEach(b => b.hidden = !manager);
+  if (!manager && (tab === "report" || tab === "setup")) tab = "orders";
+  document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
+  ["orders","riders","report","setup"].forEach(t => $("#v-" + t).hidden = t !== tab);
+}
+function renderAll(){
+  if (!manager && day !== ymd(new Date())){ setDay(ymd(new Date())); return; }
+  renderHeader();
+  if (tab === "orders" && !document.activeElement?.matches?.("[data-eref],[data-creason],[data-cby]")) renderOrders();
+  if (tab === "riders" && !document.activeElement?.closest?.("[data-collect]")) renderRiders();
+  if (tab === "setup" && !document.activeElement?.closest?.("#v-setup")) renderSetup();
+}
+function setDay(d){ if (!d) return; day = d; confirmCancel = null; if (mode === "db") subscribeDays(); renderAll(); if (tab === "report") loadReport(); }
+
+/* ---------- events ---------- */
+$("#prevDay").onclick = () => setDay(addDays(day, -1));
+$("#nextDay").onclick = () => setDay(addDays(day, 1));
+$("#todayBtn").onclick = () => setDay(ymd(new Date()));
+$("#dayPick").onchange = e => setDay(e.target.value);
+document.querySelector(".tabs").onclick = e => { const b = e.target.closest(".tab"); if (!b) return; tab = b.dataset.tab; ls.set("breadorders.tab", tab); renderAll(); if (tab === "report") loadReport(); if (tab === "setup") renderSetup(); };
+$("#newOrderBtn").onclick = () => { editing = "new"; renderForm(); $("#fCust")?.focus(); };
+$("#search").oninput = e => { search = e.target.value.trim(); renderOrders(); };
+$("#statusChips").onclick = e => { const c = e.target.closest(".chip"); if (!c) return; filter = c.dataset.f; renderOrders(); };
+$("#formPanel").addEventListener("click", e => {
+  if (e.target.id === "closeForm" || e.target.id === "cancelForm"){ editing = null; renderForm(); return; }
+  const s = e.target.closest("[data-step]"); if (s){ const inp = s.parentElement.querySelector("input"); inp.value = Math.max(0, (+inp.value || 0) + +s.dataset.step) || ""; formTotal(); }
+});
+$("#formPanel").addEventListener("input", formTotal);
+$("#formPanel").addEventListener("change", e => { if (e.target.name === "pm") $("#eRow").hidden = e.target.value === "cod"; });
+$("#formPanel").addEventListener("submit", submitForm);
+["#orderList","#earlierList"].forEach(s => $(s).addEventListener("click", e => { const b = e.target.closest("[data-act]"); if (b) ticketAction(b); }));
+["#orderList","#earlierList"].forEach(s => $(s).addEventListener("change", e => { if (e.target.matches("[data-rcfile]")) uploadReceipt(e.target); }));
+$("#viewer").onclick = e => { if (e.target.id === "viewer" || e.target.id === "closeViewer") $("#viewer").hidden = true; };
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#viewer").hidden = true; });
+$("#riderBody").addEventListener("click", async e => {
+  const b = e.target.closest("[data-turnin]");
+  if (b){ const rid = b.dataset.turnin; const v = $("#rcv_" + rid).value;
+    if (v === ""){ toast("Enter the cash received first"); $("#rcv_" + rid).focus(); return; }
+    const box = b.closest("[data-collect]"); const r = remark(+box.dataset.exp, +v); const reason = $("#rsn_" + rid).value.trim();
+    if (r.d !== 0 && !reason){ toast(`${r.txt}. Please type the reason.`); $("#rsn_" + rid).focus(); return; }
+    b.disabled = true; turnIn(rid, +v, reason); return; }
+  const c = e.target.closest("[data-copytally]"); if (c){ const rid = c.dataset.copytally;
+    try { await navigator.clipboard.writeText(tallyText(rid, riderTally(rid))); toast("Tally copied"); } catch { toast("Copy is blocked here. Long-press the tally to copy it."); } }
+});
+$("#riderBody").addEventListener("input", e => { const box = e.target.closest("[data-collect]"); if (!box || !e.target.id.startsWith("rcv_")) return;
+  const el = box.querySelector("[data-remark]"); if (e.target.value === ""){ el.className = "pill st-new"; el.textContent = "Enter the cash received"; return; }
+  const r = remark(+box.dataset.exp, +e.target.value); el.className = "pill " + r.cls; el.textContent = r.txt; });
+$("#shiftChips").onclick = e => { const c = e.target.closest("[data-shift]"); if (!c) return; const v = SHIFTS[c.dataset.shift]; shift = { from:v[0], to:v[1] }; renderRiders(); };
+["#shFrom","#shTo"].forEach(id => $(id).onchange = () => { shift = { from: $("#shFrom").value, to: $("#shTo").value }; renderRiders(); });
+$("#repPeriod").onchange = loadReport; $("#repFrom").onchange = loadReport; $("#repTo").onchange = loadReport;
+$("#repExcel").onclick = downloadExcel;
+$("#saveStore").onclick = () => { setup.name = $("#setName").value.trim(); setup.fee = +$("#setFee").value || 0; saveSetup(); };
+$("#addItem").onclick = () => { const n = $("#newItem").value.trim(); if (!n) return; setup.items.push({ id: uid("it"), name:n, price: +$("#newItemPrice").value || 0 }); $("#newItem").value = $("#newItemPrice").value = ""; saveSetup(); renderSetup(); };
+$("#newRider").onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); $("#addRider").click(); } };
+["#newItem","#newItemPrice"].forEach(id => $(id).onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); $("#addItem").click(); } });
+$("#addRider").onclick = () => { const n = $("#newRider").value.trim(); if (!n) return; setup.riders.push({ id: uid("r"), name:n }); $("#newRider").value = ""; saveSetup(); renderSetup(); };
+$("#itemEdit").addEventListener("change", e => { const row = e.target.closest("[data-iid]"); const it = setup.items.find(i => i.id === row.dataset.iid); if (!it) return; if (e.target.dataset.k === "name") it.name = e.target.value.trim() || it.name; else it.price = +e.target.value || 0; saveSetup(); });
+$("#itemEdit").addEventListener("click", e => { if (!e.target.closest("[data-rm]")) return; const it = setup.items.find(i => i.id === e.target.closest("[data-iid]").dataset.iid); if (it){ it.gone = true; saveSetup(); renderSetup(); } });
+$("#riderEdit").addEventListener("change", e => { const r = setup.riders.find(x => x.id === e.target.closest("[data-rid]").dataset.rid); if (r){ r.name = e.target.value.trim() || r.name; saveSetup(); } });
+$("#riderEdit").addEventListener("click", e => { if (!e.target.closest("[data-rm]")) return; const r = setup.riders.find(x => x.id === e.target.closest("[data-rid]").dataset.rid); if (r){ r.gone = true; saveSetup(); renderSetup(); } });
+
+/* ---------- boot ---------- */
+localLoad();
+renderAll();
+$("#syncNote").textContent = "Connecting…";
+(async () => {
+  const c = window.claude;
+  const [d, u] = await Promise.all([c?.use?.("db").catch(() => null), c?.use?.("user").catch(() => null)]);
+  if (!d){ manager = true; renderAll(); $("#syncNote").textContent = "Saved on this device only"; return; }
+  db = d; mode = "db"; days = {};
+  if (u){ try { manager = !!(await u.canEdit()) || !!(await u.isOwner()); } catch { manager = false; } } else manager = false;
+  if (manager) tab = ls.get("breadorders.tab", tab);
+  db.doc("app/setup").onSnapshot(s => { const v = s.data(); if (v) setup = { name:"", fee:0, items:[], riders:[], ...JSON.parse(JSON.stringify(v)) }; renderAll(); if (editing === "new" && !document.activeElement?.closest?.("#orderForm")) renderForm(); }, () => {});
+  subscribeDays();
+  if (tab === "report") loadReport();
+  setInterval(() => { if (!manager && day !== ymd(new Date()) && !editing) renderAll(); }, 60000);
+})();
+})();
+</script>
+
+</body></html>
