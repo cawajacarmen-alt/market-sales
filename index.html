@@ -198,6 +198,9 @@ td.wrapcell{white-space:normal;min-width:160px}
     <h2>Backup</h2>
     <div class="card"><p class="note">Everything is saved only in this browser on this phone. Download a backup often (once a week at least) and keep it somewhere safe, like your Messenger or Google Drive. To move to a new phone, open this app there and restore the backup.</p>
       <div class="bar"><button class="btn primary" id="bkDown">Download backup</button><label class="btn" for="bkFile">Restore from backup</label><input id="bkFile" type="file" accept=".json,application/json" hidden></div><p class="note" id="bkNote"></p></div>
+    <h2>Google Sheet</h2>
+    <div class="card"><p class="note" id="shNote"></p>
+      <div class="lockbar"><input id="shUrl" placeholder="Paste the Web app URL from Google" style="flex:1;min-width:200px" autocomplete="off"><button class="btn primary" id="shSave">Connect</button><button class="btn" id="shOff">Disconnect</button></div></div>
     <h2>Expense categories</h2>
     <div class="sheet">
       <div id="cList"></div>
@@ -296,7 +299,7 @@ function saveLocal(){ try{ localStorage.setItem(LS,JSON.stringify({carry:S.carry
 const dayRef=date=>db.collection(date===today()?"sales/setup/live":"sales/setup/days").doc(date);
 function loadLocal(){ try{ const j=JSON.parse(localStorage.getItem(LS)||"null"); if(!j){ S.name=SEED.name; S.items=SEED.items.map(x=>Object.assign({},x)); S.cats=SEED.cats.slice(); saveLocal(); return; } if(j){ S.carry=j.carry||null; S.name=j.name||""; S.items=j.items||[]; S.cats=j.cats||S.cats; S.days=j.days||{}; } }catch(e){} }
 const timers={}, dirty=new Set(), writing={}, liveIds=new Set();
-function queueDay(date){ saveLocal(); if(!live) return; dirty.add(date); clearTimeout(timers[date]); timers[date]=setTimeout(()=>writeDay(date),600); }
+function queueDay(date){ if(S.days[date]) S.days[date].u=Date.now(); saveLocal(); shQueue(date); if(!live) return; dirty.add(date); clearTimeout(timers[date]); timers[date]=setTimeout(()=>writeDay(date),600); }
 async function writeDay(date){
   if(writing[date]){ writing[date]="again"; return; }
   writing[date]=true; setSync("Saving…");
@@ -308,12 +311,12 @@ async function writeDay(date){
 function queueCarry(d){
   if(S.carry&&S.carry.date>d) return;
   const end={}; S.items.forEach(it=>{ const r=rawRow(d,"main",it.id); if(r.end!==undefined&&r.end!=="") end[it.id]=n(r.end); });
-  S.carry={date:d,end}; saveLocal(); if(!live) return;
+  S.carry={date:d,end}; saveLocal(); shQueue(null); if(!live) return;
   clearTimeout(queueCarry.t); queueCarry.t=setTimeout(()=>db.doc("sales/carry").set({date:S.carry.date,end:S.carry.end,updatedAt:Date.now()}).catch(()=>{}),800);
 }
 let setupWriting=false, setupAgain=false;
 async function writeSetup(){
-  saveLocal(); if(!live||!M) return;
+  shSetupChanged(); saveLocal(); if(!live||!M) return;
   if(setupWriting){ setupAgain=true; return; }
   setupWriting=true; setSync("Saving…");
   try{ await db.doc("sales/setup").set({name:S.name,items:S.items,cats:S.cats,updatedAt:Date.now()}); setSync("Saved to your account"); }
@@ -660,7 +663,7 @@ async function saveBlob(name,blob){
 // Manager mode: past days, Report, Excel and Branch & items. Locked behind a PIN once one is set.
 const pin=()=>{ try{ return localStorage.getItem(PINK)||""; }catch(e){ return ""; } };
 function setRole(m){ M=m; OWN=m; $("rExcel").hidden=!m; $("who").textContent=m?"Manager":"Staff"; $("lockBtn").textContent=m?(pin()?"Lock":"Set a PIN"):"Manager"; $("pinBox").hidden=true; render(); renderPinNote(); }
-function renderPinNote(){ $("pinNote").textContent=pin()?"A PIN is set. Staff see only today's entry until someone unlocks with the PIN. Type a new PIN to change it.":"No PIN yet, so anyone using this phone can see reports and change prices. Set a PIN that only you know."; const b=bkAge(); $("bkNote").textContent=b===null?"No backup downloaded yet.":"Last backup: "+(b===0?"today":b+" day"+(b===1?"":"s")+" ago")+"."; }
+function renderPinNote(){ renderShNote(); $("pinNote").textContent=pin()?"A PIN is set. Staff see only today's entry until someone unlocks with the PIN. Type a new PIN to change it.":"No PIN yet, so anyone using this phone can see reports and change prices. Set a PIN that only you know."; const b=bkAge(); $("bkNote").textContent=b===null?"No backup downloaded yet.":"Last backup: "+(b===0?"today":b+" day"+(b===1?"":"s")+" ago")+"."; }
 function bkAge(){ try{ const d=localStorage.getItem(BKK); return d?Math.round((parse(today())-parse(d))/86400000):null; }catch(e){ return null; } }
 $("lockBtn").onclick=()=>{ if(M){ if(!pin()){ S.tab="setup"; render(); $("pinNew").focus(); return; } setRole(false); toast("Locked. Staff view."); return; } $("pinBox").hidden=false; $("pinIn").value=""; $("pinIn").focus(); };
 $("pinX").onclick=()=>{ $("pinBox").hidden=true; };
@@ -673,7 +676,7 @@ $("bkDown").onclick=()=>{ const data={app:"branch-sales-offline",branch:S.name,s
 $("bkFile").addEventListener("change",async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
   try{ const j=JSON.parse(await f.text()), d=j&&j.data; if(!d||!Array.isArray(d.items)) throw 0;
     const nd=Object.keys(d.days||{}).length; if(!confirm("Replace everything on this phone with the backup from "+(j.savedAt||"").slice(0,10)+" ("+nd+" days)?")) return;
-    localStorage.setItem(LS,JSON.stringify(d)); loadLocal(); render(); toast("Backup restored: "+nd+" days"); }
+    localStorage.setItem(LS,JSON.stringify(d)); loadLocal(); Object.keys(S.days).forEach(x=>shPend.add(x)); shQueue(null); render(); toast("Backup restored: "+nd+" days"); }
   catch(x){ toast("That file is not a backup from this app."); } });
 $("shareDay").onclick=async()=>{ const d=S.dDate, t=totals(stockRows([d],"main"),expRows([d],"main")), c=cashVal(d,"main");
   const lines=[(S.name||"Branch")+" sales, "+nice(d),"Sales: "+peso(t.sales)+" ("+fmt(t.sold)+" pcs sold)"];
@@ -688,7 +691,72 @@ try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(
 // Website copy: keep the page available offline.
 try{ if("serviceWorker" in navigator&&location.protocol==="https:") navigator.serviceWorker.register("sw.js"); }catch(e){}
 setSync("Saved on this phone only");
+
+/* ---------- Google Sheet sharing ----------
+   Each phone keeps everything locally and also sends changed days to the owner's Google Sheet
+   (an Apps Script web app). Every few minutes it pulls the Sheet so other phones' entries show up.
+   Per day, the newest edit wins (S.days[d].u). */
+const SHK=LS+".sheet", SHP=LS+".sheetPending", SHU=LS+".setupU";
+const lsGet=k=>{ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } };
+const lsSet=(k,v)=>{ try{ if(v) localStorage.setItem(k,v); else localStorage.removeItem(k); }catch(e){} };
+const sheetUrl=()=>lsGet(SHK);
+let shPend=new Set(JSON.parse(lsGet(SHP)||"[]")), shSetup=lsGet(SHP+".setup")==="1", shT=null, shBusy=false, shLast=null, shErr="";
+let setupU=Number(lsGet(SHU))||0;
+function shSave(){ lsSet(SHP,shPend.size?JSON.stringify([...shPend]):""); lsSet(SHP+".setup",shSetup?"1":""); }
+function shSetupChanged(){ setupU=Date.now(); lsSet(SHU,String(setupU)); shSetup=true; shSave(); shQueue(null); }
+function shQueue(d){ if(d) shPend.add(d); shSave(); if(!sheetUrl()) return; clearTimeout(shT); shT=setTimeout(shFlush,1500); }
+function daySum(d){
+  const sr=stockRows([d],"main"), er=expRows([d],"main"), t=totals(sr,er), c=cashVal(d,"main");
+  return {items:sr.map(r=>[iname(r.iid),r.price||0,r.beg,r.in,r.out,r.hasEnd?r.end:"",r.hasEnd?r.sold:"",r.hasEnd?r2(r.sold*(r.price||0)):""]),
+    exp:er.map(e=>[e.cat,e.amt,e.note]), tot:[t.sales,t.exp,t.net,c===""?"":Number(c),c===""?"":r2(Number(c)-t.net)]};
+}
+function shStatus(t){ shErr=t||""; setSync(t||("Saved · shared to Google Sheet"+(shLast?" "+new Date(shLast).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):""))); renderShNote(); }
+async function shFlush(){
+  const u=sheetUrl(); if(!u||shBusy||(!shPend.size&&!shSetup)) return;
+  if(!navigator.onLine){ shStatus("Saved on this phone · will send to Google Sheet when online"); return; }
+  shBusy=true; const ds=[...shPend], withSetup=shSetup;
+  const body={action:"save",branch:S.name,days:ds.filter(d=>S.days[d]).map(d=>({date:d,day:S.days[d],sum:daySum(d)})),carry:S.carry,
+    setup:withSetup?{name:S.name,items:S.items,cats:S.cats,u:setupU}:null};
+  try{
+    const r=await fetch(u,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)});
+    const j=await r.json(); if(!j.ok) throw new Error(j.error||"bad");
+    ds.forEach(d=>shPend.delete(d)); if(withSetup) shSetup=false; shSave(); shLast=Date.now(); shStatus("");
+  }catch(e){ shStatus("Saved on this phone · could not send to Google Sheet yet"); setTimeout(shFlush,30000); }
+  shBusy=false; if(shPend.size||shSetup) setTimeout(shFlush,1000);
+}
+const typing=()=>{ const a=document.activeElement; return !!(a&&a.closest&&(a.closest("#dBody")||a.closest("#view-setup"))&&(a.tagName==="INPUT"||a.tagName==="SELECT")); };
+async function shPull(){
+  const u=sheetUrl(); if(!u||!navigator.onLine) return;
+  try{
+    const r=await fetch(u+(u.includes("?")?"&":"?")+"action=all&t="+Date.now()); const j=await r.json(); if(!j.ok) throw 0;
+    const rd=j.days||{}; let changed=false;
+    Object.keys(rd).forEach(d=>{ const day=rd[d]; if(!day||shPend.has(d)) return; const l=S.days[d];
+      if(!l||(day.u||0)>(l.u||0)){ S.days[d]=day; changed=true; } });
+    Object.keys(S.days).forEach(d=>{ const l=S.days[d]; if(!rd[d]||((l.u||0)>(rd[d].u||0))) shPend.add(d); });
+    const st=j.setup; if(st&&Array.isArray(st.items)&&(st.u||0)>setupU&&!shSetup){ S.name=st.name||S.name; S.items=st.items; S.cats=st.cats||S.cats; setupU=st.u; lsSet(SHU,String(setupU)); changed=true; }
+    else if(!st||(setupU>(st.u||0))) shSetup=true;
+    if(j.carry&&j.carry.date&&(!S.carry||j.carry.date>S.carry.date)){ S.carry=j.carry; changed=true; }
+    shSave(); shLast=Date.now();
+    if(changed){ saveLocal(); if(!typing()) render(); }
+    shStatus(""); if(shPend.size||shSetup) shFlush();
+  }catch(e){ shStatus("Saved on this phone · could not reach Google Sheet"); }
+}
+function renderShNote(){ const el=$("shNote"); if(!el) return; const u=sheetUrl();
+  el.textContent=u?("Connected. Entries on this phone are shared with your Google Sheet and with every phone or computer connected to it."+(shPend.size?" Waiting to send "+shPend.size+" day"+(shPend.size===1?"":"s")+".":"")+(shErr?" "+shErr+".":""))
+    :"Not connected. Entries stay only on this phone. Paste the Web app URL from your Google Sheet to share them with your other phones and computer.";
+  if(document.activeElement!==$("shUrl")) $("shUrl").value=u; $("shOff").hidden=!u; }
+$("shSave").onclick=async()=>{ const v=$("shUrl").value.trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)){ toast("Paste the Web app URL. It starts with https://script.google.com/macros/s/ and ends with /exec"); return; }
+  toast("Connecting…");
+  try{ const r=await fetch(v+"?action=ping&t="+Date.now()); const j=await r.json(); if(!j.ok) throw 0; }
+  catch(e){ toast("Could not reach that Sheet. Check the link and that access is set to Anyone."); return; }
+  lsSet(SHK,v); Object.keys(S.days).forEach(d=>shPend.add(d)); shSave(); toast("Connected to Google Sheet"); await shPull(); renderShNote(); };
+$("shOff").onclick=()=>{ if(!confirm("Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.")) return; lsSet(SHK,""); renderShNote(); setSync("Saved on this phone only"); };
+window.addEventListener("online",()=>{ shFlush(); shPull(); });
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") shPull(); });
+setInterval(()=>{ if(document.visibilityState==="visible") shPull(); },60000);
 setRole(!pin());
+renderShNote(); if(sheetUrl()){ setSync("Connecting to Google Sheet…"); shPull(); }
 setInterval(()=>{ if(!M&&S.dDate!==today()){ S.dDate=today(); render(); } },60000);
 })();
 </script>
