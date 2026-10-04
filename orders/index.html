@@ -306,7 +306,7 @@ tfoot td{font-weight:600;background:var(--sunk)}
 <div class="viewer" id="viewer" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
-<script>window.WS_CFG={"app": "ord", "name": "Bakery Orders – Online", "split": [["^days/", {"orders": "map", "collections": "map"}]], "seed": {"app/setup": {"fee": 0, "items": [{"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 0}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}], "name": "", "riders": [{"id": "rmuriv7om3jaj", "name": "jimm"}, {"id": "rmurivq4kxc22", "name": "selo"}, {"id": "rmurivt4bid2y", "name": "anto"}]}}, "minV": 3};
+<script>window.WS_CFG={"app": "ord", "name": "Bakery Orders – Online", "split": [["^days/", {"orders": "map", "collections": "map"}]], "seed": {"app/setup": {"fee": 0, "items": [{"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 0}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}], "name": "", "riders": [{"id": "rmuriv7om3jaj", "name": "jimm"}, {"id": "rmurivq4kxc22", "name": "selo"}, {"id": "rmurivt4bid2y", "name": "anto"}]}}, "minV": 3, "feeds": {"prd": {"prefix": ["bakery/log$"]}}, "master": {"path": "app/setup"}};
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
 // change different orders or receipts on the same day both keep their change.
@@ -358,6 +358,29 @@ function wsStamp(rec, doc, sp, now) {
 }
 
 
+/* One bread list for every website: breads, names and prices come from the Production website (Breads & bakers).
+   Matched by name, word order and capitals ignored ("Pandesal Malunggay" = "Malunggay Pandesal").
+   A bread already on a page keeps its id (so past entries stay linked) and takes Production's name and price;
+   a new bread is added with Production's id; breads only a page has (drinks, chips) are left alone.
+   Returns the new list, or null when nothing changed. */
+function wsMasterKey(s) { return String(s || '').toLowerCase().split(/\s+/).filter(Boolean).sort().join(' '); }
+function wsMasterItems(items, products) {
+  var list = (items || []).map(function (x) { return Object.assign({}, x); }), ch = false;
+  (products || []).forEach(function (p) {
+    if (!p || !String(p.name || '').trim() || p.gone) return;
+    var name = String(p.name).trim(), k = wsMasterKey(name), pr = Number(p.price) > 0 ? Math.round(Number(p.price) * 100) / 100 : 0;
+    var i = list.filter(function (x) { return wsMasterKey(x.name) === k; })[0];
+    if (!i) {
+      var id = p.id || ('it' + k.replace(/\W+/g, ''));
+      if (list.some(function (x) { return x.id === id; })) id = 'p_' + id;
+      list.push({ id: id, name: name, price: pr }); ch = true; return;
+    }
+    if (i.name !== name) { i.name = name; ch = true; }
+    if (pr && Number(i.price) !== pr) { i.price = pr; ch = true; }
+    if (i.gone) { delete i.gone; ch = true; }
+  });
+  return ch ? list : null;
+}
 /* Website copy: stands in for the Claude account features the app was written for.
    - db: documents saved in this browser, and shared through the owner's Google Sheet when connected
    - user: manager (owner) after unlocking with the PIN, staff otherwise
@@ -451,11 +474,18 @@ function wsStamp(rec, doc, sp, now) {
       return fetch(sheet + (sheet.indexOf('?') >= 0 ? '&' : '?') + 'action=docs&app=' + a + '&since=' + fc[a].since + '&t=' + now())
         .then(function (r) { return r.json(); }).then(function (j) {
           if (!j.ok) return;
-          Object.keys(j.docs || {}).forEach(function (p) { if (feeds[a].prefix.some(function (x) { return p.indexOf(x) === 0; })) fc[a].recs[p] = j.docs[p]; });
+          Object.keys(j.docs || {}).forEach(function (p) { if (feeds[a].prefix.some(function (x) { return x.slice(-1) === '$' ? p === x.slice(0, -1) : p.indexOf(x) === 0; })) fc[a].recs[p] = j.docs[p]; });
           Object.keys(fc[a].recs).forEach(function (p) { var m = /(\d{4}-\d{2}-\d{2})$/.exec(p); if (m && m[1] < old) delete fc[a].recs[p]; });
           fc[a].since = j.t || fc[a].since; lsSet(LS + '.feed.' + a, fc[a]);
         }).catch(function () {});
-    })).then(derive);
+    })).then(function () { derive(); masterSync(); });
+  }
+  /* breads and prices from the Production website (C.master = {path}), see master.js */
+  function masterSync() {
+    if (!C.master || !fc.prd || !window.wsMasterItems) return;
+    var rec = fc.prd.recs['bakery/log'], own = clone(docOf(C.master.path)); if (!rec || !own) return;
+    var st = wsAssemble(rec, {}) || {}, ni = wsMasterItems(own.items, st.products); if (!ni) return;
+    own.items = ni; write(C.master.path, own);
   }
   function derive() {
     if (!window.WS_DERIVE) return;
