@@ -1,4 +1,4 @@
-// Bakery websites — Google Sheet connector (version 4: branch sales, deliveries, online orders and production in one Sheet).
+// Bakery websites — Google Sheet connector (version 5: branch sales, deliveries, online orders and production in one Sheet, with staff logins).
 // Paste this into Extensions > Apps Script of your Google Sheet, then Deploy > New deployment >
 // Web app, Execute as: Me, Who has access: Anyone. Copy the Web app URL into the app (Branch & items > Google Sheet).
 //
@@ -6,12 +6,14 @@
 //                 Other branches: "Mabuhay Daily totals", "Mabuhay Sales", "Mabuhay Expenses", and so on
 //                 Deliveries, Online orders, Production (one row per bread line / order)
 //                 Data (do not edit), App data (do not edit) (what the apps read back)
+//                 Staff logins: one row per person. Name, PIN, Sites (all, or e.g. market, deliveries), Manager (yes / no).
+//                 Delete a row to remove someone's access.
 //
 // To update an existing connection: paste this over the old script, Save, then
 // Deploy > Manage deployments > pencil icon > Version: New version > Deploy. The Web app URL stays the same.
 
 const DATA = 'Data (do not edit)';
-const VERSION = 4;
+const VERSION = 5;
 const NAMES = { market: 'Market', mabuhay: 'Mabuhay', mercedes: 'Mercedes', lugay: 'Lugay', main: 'Main Branch' };
 
 // Market keeps the original keys and tab names, so its earlier entries stay where they are.
@@ -24,6 +26,7 @@ function branch_(b) {
 function doGet(e) {
   const action = (e && e.parameter && e.parameter.action) || 'all';
   if (action === 'ping') return out_({ ok: true, v: VERSION });
+  if (action === 'login') return out_(login_(e.parameter));
   if (action === 'docs') return out_(appGet_(e.parameter.app, Number(e.parameter.since) || 0));
   const br = branch_(e.parameter.b);
   const rows = sheet_(DATA, ['Key', 'Saved data', 'Updated']).getDataRange().getValues().slice(1);
@@ -259,4 +262,24 @@ function prdReadable_(date, d, all) {
       o.yield === undefined ? '' : Number(o.yield) || 0, done ? Number(o.passed) || 0 : '', done ? Number(o.damaged) || 0 : '', o.why || '', o.note || ''];
   });
   replace_(sheet_('Production', ['Date', 'Order no.', 'Bread', 'Batches', 'Baker', 'Status', 'Counted', 'Passed (released)', 'Damaged', 'Damage reason', 'Note']), date, rows);
+}
+
+// ---------- Staff logins ----------
+function login_(q) {
+  const sh = sheet_('Staff logins', ['Name', 'PIN', 'Sites', 'Manager']);
+  const rows = sh.getDataRange().getValues().slice(1).filter(function (r) { return String(r[0]).trim(); });
+  if (!rows.length) return { ok: false, v: VERSION, setup: true };
+  const name = String(q.name || '').trim().toLowerCase(), site = String(q.site || '').toLowerCase();
+  const cache = CacheService.getScriptCache(), ck = 'fail:' + name, fails = Number(cache.get(ck)) || 0;
+  if (fails >= 5) return { ok: false, v: VERSION, locked: true };
+  const r = rows.filter(function (x) { return String(x[0]).trim().toLowerCase() === name && pinEq_(x[1], q.pin); })[0];
+  if (!r) { cache.put(ck, String(fails + 1), 600); return { ok: false, v: VERSION }; }
+  cache.remove(ck);
+  const sites = String(r[2] || '').trim(), list = sites.toLowerCase().split(/[\s,;]+/);
+  if (sites && list.indexOf('all') < 0 && list.indexOf(site) < 0) return { ok: false, v: VERSION, site: true };
+  return { ok: true, v: VERSION, name: String(r[0]).trim(), sites: sites || 'all', manager: /^(y|yes|oo|true|1)$/i.test(String(r[3]).trim()) };
+}
+function pinEq_(a, b) {
+  const x = String(a).trim(), y = String(b || '').trim();
+  return !!y && (x === y || (/^\d+$/.test(y) && x !== '' && Number(x) === Number(y)));
 }

@@ -1,4 +1,93 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Main Branch Sales</title><meta name="theme-color" content="#2f6b3a"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Main Branch Sales</title><meta name="theme-color" content="#2f6b3a"><script>window.WS_SITE="main";
+/* Login for the bakery websites. Runs before the app script.
+   Logins live in the owner's Google Sheet, tab "Staff logins" (Name, PIN, Sites, Manager). The Sheet script checks them.
+   One login per phone covers every site the person may open; it ends at midnight or on Log out.
+   Sets window.WS_USER = {name, manager} for the app. Needs WS_SITE (this site's key) defined first. */
+(function () {
+  var SITE = window.WS_SITE, SK = 'bakery.session', UK = 'bakery.users', SH = 'bakery.sheet';
+  var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  var set = function (k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
+  var json = function (k, d) { try { return JSON.parse(get(k)) || d; } catch (e) { return d; } };
+  var today = function () { return new Date().toLocaleDateString('en-CA'); };
+  var allowed = function (sites) { var s = String(sites || '').toLowerCase(); return !s.trim() || /\ball\b/.test(s) || s.split(/[\s,;]+/).indexOf(SITE) >= 0; };
+  window.WS_SHEET = function () { return get(SH) || ''; };
+  window.WS_SET_SHEET = function (u) { set(SH, u || null); };
+  window.WS_LOGOUT = function () { set(SK, null); location.reload(); };
+  if (!get(SH)) try { // a phone already connected before logins existed: reuse its link
+    for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (!/\.sheet$/.test(k)) continue;
+      var v = String(localStorage.getItem(k) || '').replace(/^"|"$/g, ''); if (/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { set(SH, v); break; } }
+  } catch (e) {}
+  var ses = json(SK, null);
+  if (ses && ses.day === today() && allowed(ses.sites)) { window.WS_USER = { name: ses.name, manager: !!ses.manager }; try { localStorage.setItem('breadorders.taker', JSON.stringify(ses.name)); } catch (e) {} }
+  else if (ses && ses.open && ses.day === today()) { window.WS_USER = null; } // the Sheet script has no logins yet: open as before
+  function hash(s) { // small non-reversible check for logging in again without internet on this phone
+    var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36);
+  }
+  function start(name, row) {
+    set(SK, JSON.stringify({ name: row.name || name, manager: !!row.manager, sites: row.sites || '', day: today() }));
+    location.reload();
+  }
+  function screen() {
+    var css = '#wsgate{position:fixed;inset:0;z-index:100;background:#f4f5f1;display:grid;place-items:center;padding:16px;font:15px system-ui,sans-serif;color:#1a1a1a;overflow:auto}' +
+      '#wsgate form{background:#fff;border:1px solid #d6d9d2;border-radius:14px;padding:22px;max-width:360px;width:100%;display:grid;gap:12px}' +
+      '#wsgate h1{margin:0;font-size:22px}#wsgate p{margin:0;font-size:13px;color:#555}#wsgate label{display:grid;gap:4px;font-size:13px;font-weight:600;color:#444}' +
+      '#wsgate input{font:inherit;padding:10px;border:1px solid #bbb;border-radius:8px;color:#1a1a1a;background:#fff;min-width:0}' +
+      '#wsgate button{font:600 15px system-ui,sans-serif;padding:11px;border-radius:8px;border:0;background:#2f6b3a;color:#fff;cursor:pointer}' +
+      '#wsgate .err{color:#b3342b;font-weight:600;font-size:13px;min-height:1em}#wsgate a{color:#2f6b3a;font-size:13px}';
+    var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+    var g = document.createElement('div'); g.id = 'wsgate';
+    var need = !window.WS_SHEET();
+    g.innerHTML = '<form autocomplete="off"><h1>' + (document.title || 'Log in') + '</h1>' +
+      '<p>Log in with your name and PIN. Ask the owner if you don\'t have one.</p>' +
+      '<label>Your name<input id="gName" autocomplete="username" required></label>' +
+      '<label>PIN<input id="gPin" type="password" inputmode="numeric" autocomplete="current-password" required></label>' +
+      '<div id="gSetup"' + (need ? '' : ' hidden') + '><label>Google Sheet link (owner sets this once per phone)<input id="gUrl" placeholder="https://script.google.com/macros/s/…/exec"></label></div>' +
+      '<div class="err" id="gErr"></div><button type="submit">Log in</button>' +
+      (need ? '' : '<a href="#" id="gShow">Change the Google Sheet link</a>') + '</form>';
+    document.body.appendChild(g);
+    var q = function (s) { return g.querySelector(s); };
+    if (q('#gShow')) q('#gShow').onclick = function (e) { e.preventDefault(); q('#gSetup').hidden = false; q('#gUrl').value = window.WS_SHEET(); };
+    q('#gName').value = json(UK, {}).last || '';
+    (q('#gName').value ? q('#gPin') : q('#gName')).focus();
+    q('form').onsubmit = function (e) {
+      e.preventDefault();
+      var name = q('#gName').value.trim(), pin = q('#gPin').value.trim(), url = (q('#gUrl').value || '').trim() || window.WS_SHEET(), err = q('#gErr');
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(url)) { err.textContent = 'Paste the Google Sheet link first (it ends with /exec).'; q('#gSetup').hidden = false; return; }
+      var cache = json(UK, {}), key = name.toLowerCase();
+      var offline = function () {
+        var c = cache[key];
+        if (c && c.h === hash(key + '|' + pin) && allowed(c.sites)) { start(name, c); return; }
+        err.textContent = 'No internet. Connect once to log in on this phone.';
+      };
+      if (!navigator.onLine) { offline(); return; }
+      err.textContent = 'Checking…';
+      fetch(url + '?action=login&site=' + encodeURIComponent(SITE) + '&name=' + encodeURIComponent(name) + '&pin=' + encodeURIComponent(pin) + '&t=' + Date.now())
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          window.WS_SET_SHEET(url);
+          if (!(j.v >= 5)) { set(SK, JSON.stringify({ open: 1, day: today() })); location.reload(); return; } // old script: no logins yet
+          if (j.setup) { err.textContent = 'No logins yet. In your Google Sheet open the "Staff logins" tab and add yourself (Name, PIN, Sites: all, Manager: yes).'; return; }
+          if (!j.ok) { err.textContent = j.locked ? 'Too many wrong tries. Wait 10 minutes.' : j.site ? 'You don\'t have access to this site.' : 'Wrong name or PIN.'; return; }
+          cache[key] = { name: j.name, manager: !!j.manager, sites: j.sites || '', h: hash(key + '|' + pin) }; cache.last = j.name; set(UK, JSON.stringify(cache));
+          start(name, j);
+        })
+        .catch(offline);
+    };
+  }
+  function bar() {
+    if (!window.WS_USER) return;
+    var b = document.createElement('div');
+    b.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:40;background:#1a1a1a;color:#fff;border-radius:99px;padding:6px 6px 6px 12px;font:600 13px system-ui,sans-serif;display:flex;gap:8px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    b.innerHTML = '<span></span><button style="font:600 12px system-ui,sans-serif;border:0;border-radius:99px;padding:5px 10px;background:#fff;color:#1a1a1a;cursor:pointer">Log out</button>';
+    b.firstChild.textContent = window.WS_USER.name + (window.WS_USER.manager ? ' · manager' : '');
+    b.lastChild.onclick = window.WS_LOGOUT; document.body.appendChild(b);
+  }
+  var locked = window.WS_USER === undefined;
+  window.WS_LOCKED = locked;
+  var go = function () { if (locked) screen(); else bar(); };
+  if (document.body) go(); else document.addEventListener('DOMContentLoaded', go);
+})();
+</script><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&display=swap">
 <script>/*! xlsx.mini 0.18.5 (c) SheetJS LLC, Apache-2.0 */
@@ -299,7 +388,7 @@ function saveLocal(){ try{ localStorage.setItem(LS,JSON.stringify({carry:S.carry
 const dayRef=date=>db.collection(date===today()?"sales/setup/live":"sales/setup/days").doc(date);
 function loadLocal(){ try{ const j=JSON.parse(localStorage.getItem(LS)||"null"); if(!j){ S.name=SEED.name; S.items=SEED.items.map(x=>Object.assign({},x)); S.cats=SEED.cats.slice(); saveLocal(); return; } if(j){ S.carry=j.carry||null; S.name=j.name||""; S.items=j.items||[]; S.cats=j.cats||S.cats; S.days=j.days||{}; } }catch(e){} }
 const timers={}, dirty=new Set(), writing={}, liveIds=new Set();
-function queueDay(date){ if(S.days[date]) S.days[date].u=Date.now(); saveLocal(); shQueue(date); if(!live) return; dirty.add(date); clearTimeout(timers[date]); timers[date]=setTimeout(()=>writeDay(date),600); }
+function queueDay(date){ if(S.days[date]){ S.days[date].u=Date.now(); if(window.WS_USER) S.days[date].by=WS_USER.name; } saveLocal(); shQueue(date); if(!live) return; dirty.add(date); clearTimeout(timers[date]); timers[date]=setTimeout(()=>writeDay(date),600); }
 async function writeDay(date){
   if(writing[date]){ writing[date]="again"; return; }
   writing[date]=true; setSync("Saving…");
@@ -662,7 +751,7 @@ async function saveBlob(name,blob){
   const a=document.createElement("a"), u=URL.createObjectURL(blob); a.href=u; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000); return true; }
 // Manager mode: past days, Report, Excel and Branch & items. Locked behind a PIN once one is set.
 const pin=()=>{ try{ return localStorage.getItem(PINK)||""; }catch(e){ return ""; } };
-function setRole(m){ M=m; OWN=m; $("rExcel").hidden=!m; $("who").textContent=m?"Manager":"Staff"; $("lockBtn").textContent=m?(pin()?"Lock":"Set a PIN"):"Manager"; $("pinBox").hidden=true; render(); renderPinNote(); }
+function setRole(m){ if(window.WS_USER) m=!!WS_USER.manager; M=m; OWN=m; $("rExcel").hidden=!m; $("who").textContent=window.WS_USER?WS_USER.name:m?"Manager":"Staff"; $("lockBtn").hidden=!!window.WS_USER; if(window.WS_USER){ const pc=$("pinNew").closest(".card"); pc.hidden=true; pc.previousElementSibling.hidden=true; } $("lockBtn").textContent=m?(pin()?"Lock":"Set a PIN"):"Manager"; $("pinBox").hidden=true; render(); renderPinNote(); }
 function renderPinNote(){ renderShNote(); $("pinNote").textContent=pin()?"A PIN is set. Staff see only today's entry until someone unlocks with the PIN. Type a new PIN to change it.":"No PIN yet, so anyone using this phone can see reports and change prices. Set a PIN that only you know."; const b=bkAge(); $("bkNote").textContent=b===null?"No backup downloaded yet.":"Last backup: "+(b===0?"today":b+" day"+(b===1?"":"s")+" ago")+"."; }
 function bkAge(){ try{ const d=localStorage.getItem(BKK); return d?Math.round((parse(today())-parse(d))/86400000):null; }catch(e){ return null; } }
 $("lockBtn").onclick=()=>{ if(M){ if(!pin()){ S.tab="setup"; render(); $("pinNew").focus(); return; } setRole(false); toast("Locked. Staff view."); return; } $("pinBox").hidden=false; $("pinIn").value=""; $("pinIn").focus(); };
@@ -749,7 +838,7 @@ const SHB="main"; let shOK=SHB==="market"; // other branches send only to the up
 const SHK=LS+".sheet", SHP=LS+".sheetPending", SHU=LS+".setupU";
 const lsGet=k=>{ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } };
 const lsSet=(k,v)=>{ try{ if(v) localStorage.setItem(k,v); else localStorage.removeItem(k); }catch(e){} };
-const sheetUrl=()=>lsGet(SHK);
+const sheetUrl=()=>lsGet(SHK)||(window.WS_SHEET?WS_SHEET():"");
 let shPend=new Set(JSON.parse(lsGet(SHP)||"[]")), shSetup=lsGet(SHP+".setup")==="1", shT=null, shBusy=false, shLast=null, shErr="";
 let setupU=Number(lsGet(SHU))||0;
 function shSave(){ lsSet(SHP,shPend.size?JSON.stringify([...shPend]):""); lsSet(SHP+".setup",shSetup?"1":""); }
@@ -802,8 +891,8 @@ $("shSave").onclick=async()=>{ const v=$("shUrl").value.trim();
   try{ const r=await fetch(v+"?action=ping&b="+SHB+"&t="+Date.now()); const j=await r.json(); if(!j.ok) throw 0;
     if(SHB!=="market"&&!(j.v>=2)){ toast("Update the script in your Google Sheet first, then connect again."); return; } }
   catch(e){ toast("Could not reach that Sheet. Check the link and that access is set to Anyone."); return; }
-  lsSet(SHK,v); Object.keys(S.days).forEach(d=>shPend.add(d)); shSave(); toast("Connected to Google Sheet"); await shPull(); renderShNote(); };
-$("shOff").onclick=()=>{ if(!confirm("Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.")) return; lsSet(SHK,""); renderShNote(); setSync("Saved on this phone only"); };
+  lsSet(SHK,v); if(window.WS_SET_SHEET) WS_SET_SHEET(v); Object.keys(S.days).forEach(d=>shPend.add(d)); shSave(); toast("Connected to Google Sheet"); await shPull(); renderShNote(); };
+$("shOff").onclick=()=>{ if(!confirm("Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.")) return; lsSet(SHK,""); if(window.WS_SET_SHEET) WS_SET_SHEET(null); renderShNote(); setSync("Saved on this phone only"); };
 window.addEventListener("online",()=>{ shFlush(); shPull(); });
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") shPull(); });
 setInterval(()=>{ if(document.visibilityState==="visible") shPull(); },60000);
