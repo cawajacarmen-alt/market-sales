@@ -878,7 +878,7 @@ async function shPull(){
     if(j.carry&&j.carry.date&&(!S.carry||j.carry.date>S.carry.date)){ S.carry=j.carry; changed=true; }
     shSave(); shLast=Date.now();
     if(changed){ saveLocal(); if(!typing()) render(); }
-    shStatus(""); if(shPend.size||shSetup) shFlush(); dlvPull();
+    shStatus(""); if(shPend.size||shSetup) shFlush(); dlvPull(); prdPull();
   }catch(e){ shStatus("Saved on this phone · could not reach Google Sheet"); }
 }
 function renderShNote(){ const el=$("shNote"); if(!el) return; const u=sheetUrl();
@@ -897,6 +897,29 @@ window.addEventListener("online",()=>{ shFlush(); shPull(); });
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") shPull(); });
 setInterval(()=>{ if(document.visibilityState==="visible") shPull(); },60000);
 
+/* One bread list for every website: breads, names and prices come from the Production website (Breads & bakers).
+   Matched by name, word order and capitals ignored ("Pandesal Malunggay" = "Malunggay Pandesal").
+   A bread already on a page keeps its id (so past entries stay linked) and takes Production's name and price;
+   a new bread is added with Production's id; breads only a page has (drinks, chips) are left alone.
+   Returns the new list, or null when nothing changed. */
+function wsMasterKey(s) { return String(s || '').toLowerCase().split(/\s+/).filter(Boolean).sort().join(' '); }
+function wsMasterItems(items, products) {
+  var list = (items || []).map(function (x) { return Object.assign({}, x); }), ch = false;
+  (products || []).forEach(function (p) {
+    if (!p || !String(p.name || '').trim() || p.gone) return;
+    var name = String(p.name).trim(), k = wsMasterKey(name), pr = Number(p.price) > 0 ? Math.round(Number(p.price) * 100) / 100 : 0;
+    var i = list.filter(function (x) { return wsMasterKey(x.name) === k; })[0];
+    if (!i) {
+      var id = p.id || ('it' + k.replace(/\W+/g, ''));
+      if (list.some(function (x) { return x.id === id; })) id = 'p_' + id;
+      list.push({ id: id, name: name, price: pr }); ch = true; return;
+    }
+    if (i.name !== name) { i.name = name; ch = true; }
+    if (pr && Number(i.price) !== pr) { i.price = pr; ch = true; }
+    if (i.gone) { delete i.gone; ch = true; }
+  });
+  return ch ? list : null;
+}
 /* ---------- Deliveries -> Stock in ----------
    Delivery receipts saved on the Deliveries website (same Google Sheet) post into this branch's Stock in,
    matched by branch name. Stock in = delivered − damaged (or the branch's own received count);
@@ -950,6 +973,25 @@ function dlvApply(){
     if(ch){ queueDay(date); any=true; }
   });
   if(any&&!typing()) render();
+}
+
+/* ---------- Bread list from Production ----------
+   Breads, names and prices typed on the Production website (Breads & bakers) appear here by themselves,
+   so staff only enter quantities. See master.js for the matching rules. */
+const PRK=LS+".prd", PRS=LS+".prdSince";
+let prdSetup=null; try{ prdSetup=JSON.parse(lsGet(PRK)||"null"); }catch(e){}
+let prdSince=Number(lsGet(PRS))||0;
+async function prdPull(){
+  const u=sheetUrl(); if(!u||!navigator.onLine) return;
+  try{
+    const r=await fetch(u+(u.includes("?")?"&":"?")+"action=docs&app=prd&since="+prdSince+"&t="+Date.now()); const j=await r.json();
+    if(!j.ok||!(j.v>=4)) return;
+    if((j.docs||{})["bakery/log"]) prdSetup=j.docs["bakery/log"];
+    prdSince=j.t||prdSince; try{ localStorage.setItem(PRK,JSON.stringify(prdSetup)); localStorage.setItem(PRS,String(prdSince)); }catch(e){}
+    if(!prdSetup) return;
+    const ni=wsMasterItems(S.items,(wsAssemble(prdSetup,{})||{}).products);
+    if(ni){ S.items=ni; writeSetup(); if(!typing()) render(); }
+  }catch(e){}
 }
 $("dBody").addEventListener("submit",e=>{ if(e.target.id!=="ownAdd") return; e.preventDefault();
   const name=$("ownName").value.trim(), price=Number($("ownPrice").value);
