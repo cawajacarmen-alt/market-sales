@@ -867,7 +867,7 @@ function viewSheet(){
   if (!rows.length){
     h+=`<div class="note">No items yet for ${esc(store.name)}, ${P.label}. Use <b>Import from Excel or paste</b> with the Pharmacy Stock Inventory export (the "Lots on hand" sheet as of ${P.cutLabel}), copy last quarter's items, or add items one by one.</div>`;
   } else {
-    h+=`<div class="grid-tbl"><table><thead><tr><th class="n">#</th><th>Name of drug in the library (generic)</th><th>Brand name</th><th>Manufacturer</th><th>Expiry date</th><th>Price in GMAP, MRP, SRP</th><th class="n">Quantity</th><th class="n">Our price</th><th>Remarks</th></tr></thead><tbody>`;
+    h+=`<div class="grid-tbl"><table><thead><tr><th class="n">#</th><th>Name of drug in the library (generic)</th><th>Brand name</th><th>Manufacturer</th><th>Expiry date</th><th>Price in GMAP, MRP, SRP</th><th class="n">Quantity</th><th class="n">Our price</th><th>Remarks</th>${canWork(sh)?"<th></th>":""}</tr></thead><tbody>`;
     if (S.count && canWork(sh)){
       h=h.slice(0,h.lastIndexOf(`<div class="grid-tbl">`));
       h+=`<div class="note">Type the expiry date, quantity on hand and our price for each item. Each entry saves by itself.</div>
@@ -880,12 +880,12 @@ function viewSheet(){
         <td class="rm" id="c_rm_${i}">${remarkHTML(r,c)}</td></tr>`;
       h+=`</tbody></table></div>`;
     } else {
-    if (!list.length) h+=`<tr><td colspan="9" class="sub">No items match this filter.</td></tr>`;
+    if (!list.length) h+=`<tr><td colspan="10" class="sub">No items match this filter.</td></tr>`;
     for (const {r,i,c} of list){
       h+=`<tr class="${canWork(sh)?"click":""} ${c.status==="over"?"over":""}" ${canWork(sh)?`data-act="editrow"`:""} data-i="${i}">
         <td class="n">${i+1}</td><td>${esc(r.drug)}</td><td>${esc(r.brand)}</td><td>${esc(r.mfr)}</td>
         <td class="mono" style="white-space:nowrap">${esc(fmtDate(r.exp))}</td><td class="doh">${dohCell(c)}</td>
-        <td class="n">${r.qty??""}</td><td class="n">${peso(num(r.price))}</td><td class="rm">${remarkHTML(r,c)}</td></tr>`;
+        <td class="n">${r.qty??""}</td><td class="n">${peso(num(r.price))}</td><td class="rm">${remarkHTML(r,c)}</td>${canWork(sh)?`<td><button class="b sm" data-act="copyrow" data-i="${i}" title="Copy this item to add another strength or dosage form">Copy</button></td>`:""}</tr>`;
     }
     h+=`</tbody></table></div>`;
     }
@@ -900,13 +900,15 @@ function tile(k,l,v,bad){ return `<button class="tile ${S.filter===k?"on":""} ${
 function viewEditor(){
   const r=S.edit.r;
   return `<div class="ed" id="ed">
-    <div class="row"><h3 class="grow">${S.edit.i==null?"Add item":"Edit item #"+(S.edit.i+1)}</h3></div>
+    <div class="row"><h3 class="grow">${S.edit.copy?"Copy of item #"+(S.edit.after+1)+": change the strength or dosage form":S.edit.i==null?"Add item":"Edit item #"+(S.edit.i+1)}</h3></div>
     <div class="fgrid">
       <label class="f wide">Name of drug in the library (type to search the EDPMS drug library and the GMAP, MRP and SRP lists)
         <input id="e_drug" value="${esc(r.drug)}" autocomplete="off" placeholder="Generic name, e.g. Amlodipine 10 mg tablet"></label>
       <div class="wide" id="e_sugg"></div>
-      <label class="f">Brand name<input id="e_brand" value="${esc(r.brand)}"></label>
-      <label class="f">Manufacturer<input id="e_mfr" value="${esc(r.mfr)}"></label>
+      <label class="f">Brand name<input id="e_brand" list="dl_brand" autocomplete="off" value="${esc(r.brand)}"></label>
+      <label class="f">Manufacturer (pick from the list or type a new one)<input id="e_mfr" list="dl_mfr" autocomplete="off" value="${esc(r.mfr)}"></label>
+      <datalist id="dl_mfr">${knownMfrs().map(m=>`<option value="${esc(m)}">`).join("")}</datalist>
+      <datalist id="dl_brand">${[...brandMfr().values()].map(b=>`<option value="${esc(b.brand)}">${b.mfr?esc(b.mfr):""}</option>`).join("")}</datalist>
       <label class="f">Expiry date<input id="e_exp" type="date" value="${esc(r.exp)}"></label>
       <label class="f">Quantity on hand<input id="e_qty" inputmode="decimal" value="${esc(r.qty??"")}"></label>
       <label class="f">Our price per piece (₱)<input id="e_price" inputmode="decimal" value="${esc(r.price??"")}"></label>
@@ -914,7 +916,7 @@ function viewEditor(){
     <div id="e_check"></div>
     <div class="row">
       <button class="b p" data-act="esave">Save item</button>
-      ${S.edit.i==null?`<button class="b" data-act="esavenext">Save and add next</button>`:""}
+      ${S.edit.i==null?`<button class="b" data-act="esavenext">Save and add next</button>`:`<button class="b" data-act="ecopy">Copy as new item</button>`}
       <button class="b" data-act="ecancel">Cancel</button>
       <div class="grow"></div>
       ${S.edit.i!=null?(S.edit.confirmDel?`<span class="sub">Remove this item?</span><button class="b d" data-act="edelyes">Yes, remove</button><button class="b" data-act="edelno">Keep</button>`:`<button class="b d" data-act="edel">Remove item</button>`):""}
@@ -946,7 +948,27 @@ function readEditor(){
   if (r.lg && r.drug !== (r.lg+" "+r.ls).trim()) { delete r.lg; delete r.ls; }
   return r;
 }
+function knownMfrs(){
+  const seen=new Map();
+  const add=m=>{ m=(m||"").trim(); if(m && !seen.has(m.toLowerCase())) seen.set(m.toLowerCase(),m); };
+  for (const id in S.sheets) for (const r of (S.sheets[id].rows||[])) add(r.mfr);
+  for (const x of REFX) if (x.src!=="S") add(x.co);
+  return [...seen.values()].sort((a,b)=>a.localeCompare(b));
+}
+function brandMfr(){
+  const m=new Map();
+  for (const id in S.sheets) for (const r of (S.sheets[id].rows||[])) if (r.brand){ const k=r.brand.trim().toLowerCase(); if(!m.has(k) || (!m.get(k).mfr && r.mfr)) m.set(k,{brand:r.brand.trim(),mfr:(r.mfr||"").trim()}); }
+  return m;
+}
+function startCopy(src,i){
+  S.imp=null;
+  S.edit={i:null, after:i, copy:true, r:{id:uid(), drug:src.drug||"", brand:src.brand||"", mfr:src.mfr||"", exp:"", qty:null, price:null}};
+  render(); const ed=$("#ed"); if (ed) ed.scrollIntoView({behavior:"smooth",block:"start"});
+  const d=$("#e_drug"); if (d){ d.focus(); d.select(); }
+  toast("Copied. Change the strength or dosage form, then save.");
+}
 function wireEditor(){
+  $("#e_brand").addEventListener("input",()=>{ const mf=$("#e_mfr"); if (mf.value.trim() || document.activeElement===mf) return; const b=brandMfr().get($("#e_brand").value.trim().toLowerCase()); if (b && b.mfr){ mf.value=b.mfr; mf.dispatchEvent(new Event("input")); } });
   const upd=()=>{ readEditor(); $("#e_check").innerHTML=editorCheckHTML(S.edit.r); };
   ["e_brand","e_mfr","e_exp","e_qty","e_price"].forEach(id=>$("#"+id).addEventListener("input",upd));
   const d=$("#e_drug");
@@ -1108,7 +1130,7 @@ function readFile(f){
       for (const n of order){ const aoa=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:""}); const res=rowsFromAoa(aoa);
         if (res.rows.length && !res.cols[0].startsWith("(")){ best={...res,sheet:n}; break; } if(!best && res.rows.length) best={...res,sheet:n}; }
       if (!best){ toast("No rows found in that file"); return; }
-      S.imp={...best, onlyEd:best.hasEd, combine:true}; render();
+      S.imp={...best, onlyEd:best.hasEd, combine:false}; render();
     }catch(e){ toast("Could not read that file: "+e.message); }
   };
   rd.readAsArrayBuffer(f);
@@ -1212,9 +1234,11 @@ document.addEventListener("click", async e=>{
     case "picklib": readEditor(); S.edit.r.drug=t.dataset.v; delete S.edit.r.lg; delete S.edit.r.ls; render(); break;
     case "lower": readEditor(); S.edit.r.price=+t.dataset.v; render(); break;
     case "esave": case "esavenext": { const r=readEditor(); if(!r.drug){ toast("Enter the drug name"); return; }
-      const s=sh(); if (S.edit.i==null) s.rows.push(r); else s.rows[S.edit.i]=r;
+      const s=sh(); if (S.edit.i==null){ if (S.edit.after!=null && S.edit.after<s.rows.length) s.rows.splice(S.edit.after+1,0,r); else s.rows.push(r); } else s.rows[S.edit.i]=r;
       saveSheet(s); S.edit = a==="esavenext" ? {i:null, r:{id:uid(),drug:"",brand:"",mfr:"",exp:"",qty:null,price:null}} : null;
       render(); toast("Item saved"+(a==="esavenext"?". Add the next one.":"")); if (S.edit) { const d=$("#e_drug"); if (d) d.focus(); } break; }
+    case "copyrow": { const i=+t.dataset.i; startCopy(getSheet(S.sid,S.per).rows[i], i); break; }
+    case "ecopy": { const i=S.edit.i; startCopy(readEditor(), i); break; }
     case "countmode": S.count=!S.count; S.edit=null; S.imp=null; render(); break;
     case "ecancel": S.edit=null; render(); break;
     case "edel": readEditor(); S.edit.confirmDel=true; render(); break;
@@ -1232,8 +1256,8 @@ document.addEventListener("click", async e=>{
       const all=[S.year-1,S.year,S.year+1].flatMap(periodsOf); const idx=all.indexOf(S.per);
       let src=null; for (let k=idx-1;k>=0;k--){ const p=getSheet(S.sid,all[k]); if(p&&p.rows.length){ src=p; break; } }
       if (!src){ toast("No earlier upload with items for this branch"); return; }
-      const s=sh(); const have=new Set(s.rows.map(r=>(r.drug+"|"+r.brand).toLowerCase()));
-      const add=src.rows.filter(r=>!have.has((r.drug+"|"+r.brand).toLowerCase())).map(r=>({...cleanRow(r),exp:"",qty:null}));
+      const s=sh(); const key=r=>(r.drug+"|"+r.brand+"|"+(r.mfr||"")).toLowerCase(); const have=new Map(); for (const r of s.rows) have.set(key(r),(have.get(key(r))||0)+1);
+      const add=src.rows.filter(r=>{ const n=have.get(key(r))||0; if (n>0){ have.set(key(r),n-1); return false; } return true; }).map(r=>({...cleanRow(r),id:uid(),exp:"",qty:null}));
       s.rows=s.rows.concat(add); saveSheet(s); render(); toast(add.length+" items copied from "+perInfo(src.period).label+". Enter expiry and quantity as of "+perInfo(S.per).cutLabel+".");
       break; }
     case "xls": exportOne(); break;
@@ -1295,9 +1319,9 @@ lsLoad(); render(); setSaveState("Connecting…");
   if (!S.mgr){ $("#btnAll").hidden=true; applyAllow(); }
   if (!db){ setSaveState("Saved on this device only"); return; }
   S.db=db;
-  db.doc("edpms/setup").onSnapshot(sn=>{ const d=sn.exists?sn.data():null; if (d&&Array.isArray(d.stores)&&d.stores.length){ S.stores=d.stores; } if (!S.mgr) applyAllow(); if (!myStores().some(s=>s.id===S.sid)) S.sid=myStores()[0]?.id; if(!S.edit) render(); }, e=>setSaveState("Could not load: "+(e.message||e.code)));
+  db.doc("edpms/setup").onSnapshot(sn=>{ const d=sn.exists?JSON.parse(JSON.stringify(sn.data())):null; if (d&&Array.isArray(d.stores)&&d.stores.length){ S.stores=d.stores; } if (!S.mgr) applyAllow(); if (!myStores().some(s=>s.id===S.sid)) S.sid=myStores()[0]?.id; if(!S.edit) render(); }, e=>setSaveState("Could not load: "+(e.message||e.code)));
   db.collection("edpms/setup/sheets").onSnapshot(sn=>{
-    const fresh={}; sn.docs.forEach(d=>{ const v=d.data(); if (v) fresh[d.id]=v; });
+    const fresh={}; sn.docs.forEach(d=>{ const v=d.data(); if (v) fresh[d.id]=JSON.parse(JSON.stringify(v)); }); // own copy: stored data can be read-only
     for (const id of pending) if (S.sheets[id]) fresh[id]=S.sheets[id];
     if (!S.ready){ // first load: keep edits saved on this device that never reached the shared store
       for (const id in S.sheets){ const l=S.sheets[id], r=fresh[id]; if (l && l.updatedAt && (!r || (r.updatedAt||"") < l.updatedAt)){ fresh[id]=l; pending.add(id); } }
