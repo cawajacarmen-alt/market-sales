@@ -576,6 +576,10 @@ function nextPeriod(){
 function fmtDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-").map(Number); if(!m) return iso; return MON[m-1]+" "+(d?d+", ":"")+y; }
 function daysTo(iso){ const t=new Date(iso+"T23:59:59"); return Math.ceil((t-new Date())/86400000); }
 
+/* Cut-off of the sheet being shown. Until that date, items may be encoded without expiry and quantity. */
+let CUT=null;
+const early = () => !!CUT && todayISO() <= CUT;
+const toCount = r => !r.exp || num(r.qty)==null || num(r.price)==null;
 /* ---------- DOH matching ---------- */
 const SALTS = /\b(as|hydrochloride|hcl|hydrobromide|sodium|potassium|calcium|magnesium|maleate|mesylate|besylate|besilate|camsylate|camsilate|citrate|tartrate|succinate|fumarate|sulfate|sulphate|phosphate|acetate|bromide|chloride|dihydrate|monohydrate|trihydrate|anhydrous|medoxomil|cilexetil|axetil|disodium|tromethamol|tromethamine|salt|base|equivalent|to)\b/g;
 function normGen(s){
@@ -675,15 +679,16 @@ function remarkText(r, c){
   const parts=[];
   if (c.status==="over") for (const o of c.over) parts.push("ABOVE "+SRC[o.src]+" "+peso(o.cap)+" by "+peso(o.by)+(o.src==="S"?" (highest SRP)":""));
   else if (c.status==="ok") parts.push("Within DOH price ("+Object.keys(c.caps).map(k=>SRC[k]).join(", ")+")");
-  else if (c.status==="noprice") parts.push("No price entered");
+  else if (c.status==="noprice" && !early()) parts.push("No price entered");
   else if (c.status==="noref") parts.push("Not in GMAP / MRP / SRP lists");
   const sk = c.skipped.filter(x=>!c.caps[x.src]);
   if (sk.length){ const by={}; sk.forEach(x=>{ (by[x.src]=by[x.src]||new Set()).add([x.brand,x.co].filter(Boolean).join(" / ")); });
     for (const k in by) parts.push(SRC[k]+" price is for "+[...by[k]].join("; ")+" only"); }
   if (!c.lib) parts.push(c.libFix ? "Use EDPMS library name: "+c.libFix : "Not an exact EDPMS drug library name");
   if (c.brandAs) parts.push("Write the generic name ("+c.brandAs.gen+") in the drug name, not the brand");
-  if (!r.exp) parts.push("No expiry date"); else if (r.exp < todayISO()) parts.push("Expired");
-  if (num(r.qty)==null) parts.push("No quantity");
+  if (early() && toCount(r)) parts.push("Enter expiry, quantity and price on "+fmtDate(CUT));
+  else { if (!r.exp) parts.push("No expiry date"); else if (r.exp < todayISO()) parts.push("Expired");
+    if (num(r.qty)==null) parts.push("No quantity"); }
   return parts.join(". ");
 }
 function remarkHTML(r,c){
@@ -691,15 +696,16 @@ function remarkHTML(r,c){
   const h=[];
   if (c.status==="over") h.push(...c.over.map(o=>`<span class="o">Above ${SRC[o.src]} ${peso(o.cap)} by ${peso(o.by)}</span>`));
   else if (c.status==="ok") h.push(`<span class="k">Within DOH price</span>`);
-  else if (c.status==="noprice") h.push(`<span class="w">No price entered</span>`);
+  else if (c.status==="noprice" && !early()) h.push(`<span class="w">No price entered</span>`);
   else if (c.status==="noref") h.push(`<span class="i">Not in GMAP / MRP / SRP lists</span>`);
   const sk = c.skipped.filter(x=>!c.caps[x.src]);
   if (sk.length){ const by={}; sk.forEach(x=>{ (by[x.src]=by[x.src]||new Set()).add(x.brand||x.co); });
     for (const k in by) h.push(`<span class="i">${SRC[k]} is for ${esc([...by[k]].join(", "))} only</span>`); }
   if (!c.lib) h.push(c.libFix ? `<span class="w">Library name: ${esc(c.libFix)}</span>` : `<span class="w">Not an exact EDPMS library name</span>`);
   if (c.brandAs) h.push(`<span class="w">Use the generic name: ${esc(c.brandAs.gen)}</span>`);
-  if (!r.exp) h.push(`<span class="w">No expiry</span>`); else if (r.exp < todayISO()) h.push(`<span class="o">Expired</span>`);
-  if (num(r.qty)==null) h.push(`<span class="w">No quantity</span>`);
+  if (early() && toCount(r)) h.push(`<span class="i">Count on ${esc(fmtDate(CUT))}</span>`);
+  else { if (!r.exp) h.push(`<span class="w">No expiry</span>`); else if (r.exp < todayISO()) h.push(`<span class="o">Expired</span>`);
+    if (num(r.qty)==null) h.push(`<span class="w">No quantity</span>`); }
   return h.join("<br>");
 }
 function dohCell(c){
@@ -816,19 +822,21 @@ function filtered(sh){
     const f=S.filter;
     if (f==="over") return o.c.status==="over";
     if (f==="noref") return o.c.status==="noref";
-    if (f==="miss") return !o.r.exp || num(o.r.qty)==null || num(o.r.price)==null || o.c.brandAs || !o.c.lib;
+    if (f==="miss") return (!early() && toCount(o.r)) || o.c.brandAs || !o.c.lib;
+    if (f==="count") return toCount(o.r);
     if (f==="exp") return o.r.exp && o.r.exp < todayISO();
     return true;
   });
 }
 
 function viewSheet(){
+  CUT=perInfo(S.per).cutoff;
   const per=S.per, P=perInfo(per), store=S.stores.find(s=>s.id===S.sid)||S.stores[0];
   const sh=getSheet(S.sid,per);
   const rows=sh?sh.rows:[];
   const checks=rows.map(r=>check(r));
   const n={all:rows.length, over:checks.filter(c=>c.status==="over").length, noref:checks.filter(c=>c.status==="noref").length,
-    miss:rows.filter((r,k)=>!r.exp||num(r.qty)==null||num(r.price)==null||checks[k].brandAs||!checks[k].lib).length, exp:rows.filter(r=>r.exp&&r.exp<todayISO()).length};
+    miss:rows.filter((r,k)=>(!early()&&toCount(r))||checks[k].brandAs||!checks[k].lib).length, count:rows.filter(toCount).length, exp:rows.filter(r=>r.exp&&r.exp<todayISO()).length};
   const yrs=[S.year-1,S.year,S.year+1];
   const pers=yrs.flatMap(periodsOf);
   const st=sheetStatus(S.sid,per);
@@ -839,13 +847,14 @@ function viewSheet(){
       <div class="grow"></div>
       <span class="pill p-${st.k}">${esc(st.t)}</span>
     </div>
-    <div class="note">Inventory as of <b>${P.cutLabel}</b> · upload in EDPMS by <b>${P.dueLabel}</b>. Prices are per piece (tablet, capsule, vial, bottle), the same unit the DOH lists use.</div>
+    <div class="note">Inventory as of <b>${P.cutLabel}</b> · upload in EDPMS by <b>${P.dueLabel}</b>. Prices are per piece (tablet, capsule, vial, bottle), the same unit the DOH lists use.${early()?` You can encode the drug, brand and manufacturer now and save. On ${P.cutLabel}, tap <b>Enter count</b> to type the expiry, quantity and price for each item.`:""}</div>
     <div class="tiles">
-      ${tile("all","Items",n.all)}${tile("over","Above DOH price",n.over,n.over>0)}${tile("noref","Not in DOH lists",n.noref)}${tile("miss","Needs fixing (library name, expiry, qty, price)",n.miss,n.miss>0)}${tile("exp","Expired",n.exp,n.exp>0)}
+      ${tile("all","Items",n.all)}${tile("over","Above DOH price",n.over,n.over>0)}${tile("noref","Not in DOH lists",n.noref)}${tile("count",early()?"To count on "+fmtDate(P.cutoff):"No expiry or qty yet",n.count,!early()&&n.count>0)}${tile("miss",early()?"Needs fixing (library name)":"Needs fixing (library name, expiry, qty, price)",n.miss,n.miss>0)}${tile("exp","Expired",n.exp,n.exp>0)}
     </div>
     ${canWork(sh)?"":`<div class="note"><b>${sh.status==="sub"?"Submitted for review.":"Locked."}</b> ${S.mgr?"":"You can't change items until the manager returns this sheet."}</div>`}
     <div class="row" ${canWork(sh)?"":"hidden"}>
       <button class="b p" data-act="add">Add item</button>
+      ${rows.length?`<button class="b ${S.count?"p":""}" data-act="countmode">${S.count?"Done counting":"Enter count"}</button>`:""}
       <button class="b" data-act="imp">Import from Excel or paste</button>
       <button class="b" data-act="copyprev">Copy items from last upload</button>
       ${(()=>{ const k=checks.filter(c=>c.libFix).length; return k?`<button class="b" data-act="libfixall">Use EDPMS library names (${k})</button>`:""; })()}
@@ -859,6 +868,18 @@ function viewSheet(){
     h+=`<div class="note">No items yet for ${esc(store.name)}, ${P.label}. Use <b>Import from Excel or paste</b> with the Pharmacy Stock Inventory export (the "Lots on hand" sheet as of ${P.cutLabel}), copy last quarter's items, or add items one by one.</div>`;
   } else {
     h+=`<div class="grid-tbl"><table><thead><tr><th class="n">#</th><th>Name of drug in the library (generic)</th><th>Brand name</th><th>Manufacturer</th><th>Expiry date</th><th>Price in GMAP, MRP, SRP</th><th class="n">Quantity</th><th class="n">Our price</th><th>Remarks</th></tr></thead><tbody>`;
+    if (S.count && canWork(sh)){
+      h=h.slice(0,h.lastIndexOf(`<div class="grid-tbl">`));
+      h+=`<div class="note">Type the expiry date, quantity on hand and our price for each item. Each entry saves by itself.</div>
+        <div class="grid-tbl"><table class="cnt"><thead><tr><th class="n">#</th><th>Drug · brand</th><th>Expiry date</th><th class="n">Quantity</th><th class="n">Our price</th><th>Remarks</th></tr></thead><tbody>`;
+      if (!list.length) h+=`<tr><td colspan="6" class="sub">No items match this filter.</td></tr>`;
+      for (const {r,i,c} of list) h+=`<tr data-row="${i}"><td class="n">${i+1}</td><td>${esc(r.drug)}${r.brand||r.mfr?`<div class="sub">${esc([r.brand,r.mfr].filter(Boolean).join(" · "))}</div>`:""}</td>
+        <td><input type="date" id="c_exp_${r.id}" data-ci="${i}" data-k="exp" value="${esc(r.exp||"")}"></td>
+        <td class="n"><input class="num" style="width:6.5em;text-align:right" inputmode="decimal" id="c_qty_${r.id}" data-ci="${i}" data-k="qty" value="${esc(r.qty??"")}"></td>
+        <td class="n"><input class="num" style="width:6.5em;text-align:right" inputmode="decimal" id="c_price_${r.id}" data-ci="${i}" data-k="price" value="${esc(r.price??"")}"></td>
+        <td class="rm" id="c_rm_${i}">${remarkHTML(r,c)}</td></tr>`;
+      h+=`</tbody></table></div>`;
+    } else {
     if (!list.length) h+=`<tr><td colspan="9" class="sub">No items match this filter.</td></tr>`;
     for (const {r,i,c} of list){
       h+=`<tr class="${canWork(sh)?"click":""} ${c.status==="over"?"over":""}" ${canWork(sh)?`data-act="editrow"`:""} data-i="${i}">
@@ -867,6 +888,7 @@ function viewSheet(){
         <td class="n">${r.qty??""}</td><td class="n">${peso(num(r.price))}</td><td class="rm">${remarkHTML(r,c)}</td></tr>`;
     }
     h+=`</tbody></table></div>`;
+    }
   }
   h+=`</div>`;
   h+=viewReview(sh);
@@ -892,6 +914,7 @@ function viewEditor(){
     <div id="e_check"></div>
     <div class="row">
       <button class="b p" data-act="esave">Save item</button>
+      ${S.edit.i==null?`<button class="b" data-act="esavenext">Save and add next</button>`:""}
       <button class="b" data-act="ecancel">Cancel</button>
       <div class="grow"></div>
       ${S.edit.i!=null?(S.edit.confirmDel?`<span class="sub">Remove this item?</span><button class="b d" data-act="edelyes">Yes, remove</button><button class="b" data-act="edelno">Keep</button>`:`<button class="b d" data-act="edel">Remove item</button>`):""}
@@ -1100,7 +1123,7 @@ function readPaste(){
 
 /* ---------- Excel export ---------- */
 function sheetAoa(sh){
-  const st=S.stores.find(s=>s.id===sh.store), P=perInfo(sh.period);
+  const st=S.stores.find(s=>s.id===sh.store), P=perInfo(sh.period); CUT=P.cutoff;
   const aoa=[["Machica Pharmaceuticals · EDPMS upload"],["Branch",st?st.name:sh.store],["Upload",P.label],["Inventory as of",P.cutLabel],[],
     ["#","Name of Drug in the Library (Generic Name)","Brand Name","Manufacturer","Expiry Date","GMAP Price","MRP","SRP (highest)","Quantity","Our Price","Remarks"]];
   sh.rows.forEach((r,i)=>{ const c=check(r);
@@ -1188,9 +1211,11 @@ document.addEventListener("click", async e=>{
       render(); break; }
     case "picklib": readEditor(); S.edit.r.drug=t.dataset.v; delete S.edit.r.lg; delete S.edit.r.ls; render(); break;
     case "lower": readEditor(); S.edit.r.price=+t.dataset.v; render(); break;
-    case "esave": { const r=readEditor(); if(!r.drug){ toast("Enter the drug name"); return; }
+    case "esave": case "esavenext": { const r=readEditor(); if(!r.drug){ toast("Enter the drug name"); return; }
       const s=sh(); if (S.edit.i==null) s.rows.push(r); else s.rows[S.edit.i]=r;
-      saveSheet(s); S.edit=null; render(); toast("Item saved"); break; }
+      saveSheet(s); S.edit = a==="esavenext" ? {i:null, r:{id:uid(),drug:"",brand:"",mfr:"",exp:"",qty:null,price:null}} : null;
+      render(); toast("Item saved"+(a==="esavenext"?". Add the next one.":"")); if (S.edit) { const d=$("#e_drug"); if (d) d.focus(); } break; }
+    case "countmode": S.count=!S.count; S.edit=null; S.imp=null; render(); break;
     case "ecancel": S.edit=null; render(); break;
     case "edel": readEditor(); S.edit.confirmDel=true; render(); break;
     case "edelno": readEditor(); S.edit.confirmDel=false; render(); break;
@@ -1224,6 +1249,13 @@ document.addEventListener("click", async e=>{
     case "shide": { const st=S.stores.find(s=>s.id===t.dataset.sid); st.gone=!st.gone; saveSetup(); if (S.sid===st.id && st.gone) S.sid=activeStores()[0]?.id; render(); break; }
     case "sadd": { const n=$("#newStore").value.trim(); if(!n) return; let k=1; while(S.stores.some(s=>s.id==="s"+k)) k++; S.stores.push({id:"s"+k,name:n}); saveSetup(); render(); break; }
   }
+});
+document.addEventListener("input", e=>{
+  const t=e.target; if (!t.dataset || t.dataset.ci==null) return;
+  const s=getSheet(S.sid,S.per); if (!s || !canWork(s)) return; const r=s.rows[+t.dataset.ci]; if (!r) return;
+  const k=t.dataset.k; r[k] = k==="exp" ? t.value : num(t.value);
+  saveSheet(s);
+  const cell=document.getElementById("c_rm_"+t.dataset.ci); if (cell) cell.innerHTML=remarkHTML(r);
 });
 document.addEventListener("change", e=>{
   const t=e.target; const a=t.dataset&&t.dataset.act;
@@ -1272,7 +1304,8 @@ lsLoad(); render(); setSaveState("Connecting…");
       if (pending.size){ clearTimeout(saveT); saveT=setTimeout(flush,300); }
     }
     S.sheets=fresh; S.ready=true; setSaveState(pending.size?"Saving…":"All changes saved"); lsSave();
-    if (!S.edit && !S.imp) render();
+    const typing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.ci!=null;
+    if (!S.edit && !S.imp && !typing) render();
   }, e=>setSaveState("Could not load: "+(e.message||e.code)));
 })();
 </script>
