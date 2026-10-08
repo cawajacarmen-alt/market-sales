@@ -1,4 +1,4 @@
-// Bakery websites — Google Sheet connector (version 6: branch sales, deliveries, online orders, production and peddler sales in one Sheet, with staff logins).
+// Bakery and pharmacy websites — Google Sheet connector (version 7: branch sales, deliveries, online orders, production, peddler sales and EDPMS upload sheets in one Sheet, with staff logins).
 // Paste this into Extensions > Apps Script of your Google Sheet, then Deploy > New deployment >
 // Web app, Execute as: Me, Who has access: Anyone. Copy the Web app URL into the app (Branch & items > Google Sheet).
 //
@@ -8,13 +8,14 @@
 //                 Peddler sales (one row per peddler per day: taken, returned, sales, cash turned in)
 //                 Data (do not edit), App data (do not edit) (what the apps read back)
 //                 Staff logins: one row per person. Name, PIN, Sites (all, or e.g. market, deliveries), Manager (yes / no).
+//                 EDPMS staff: Sites edpms-mercedes (one branch) or edpms (every branch).
 //                 Delete a row to remove someone's access.
 //
 // To update an existing connection: paste this over the old script, Save, then
 // Deploy > Manage deployments > pencil icon > Version: New version > Deploy. The Web app URL stays the same.
 
 const DATA = 'Data (do not edit)';
-const VERSION = 6;
+const VERSION = 7;
 const NAMES = { market: 'Market', mabuhay: 'Mabuhay', mercedes: 'Mercedes', lugay: 'Lugay', main: 'Main Branch' };
 
 // Market keeps the original keys and tab names, so its earlier entries stay where they are.
@@ -128,7 +129,8 @@ const SPLITS = {
   dlv: [['^delivery/setup/days/', { drops: 'arr', ready: 'arr' }]],
   ord: [['^days/', { orders: 'map', collections: 'map' }]],
   prd: [['^bakery/log/days/', { orders: 'map' }]],
-  pdl: [['^pdl/days/', { peddlers: 'map' }]]
+  pdl: [['^pdl/days/', { peddlers: 'map' }]],
+  edp: [['^edpms/setup/sheets/', { rows: 'arr' }]]
 };
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
@@ -301,7 +303,7 @@ function login_(q) {
   if (!r) { cache.put(ck, String(fails + 1), 600); return { ok: false, v: VERSION }; }
   cache.remove(ck);
   const sites = String(r[2] || '').trim(), list = sites.toLowerCase().split(/[\s,;]+/);
-  if (sites && list.indexOf('all') < 0 && list.indexOf(site) < 0) return { ok: false, v: VERSION, site: true };
+  if (sites && list.indexOf('all') < 0 && !list.some(function (x) { return x === site || x.indexOf(site + '-') === 0; })) return { ok: false, v: VERSION, site: true };
   return { ok: true, v: VERSION, name: String(r[0]).trim(), sites: sites || 'all', manager: /^(y|yes|oo|true|1)$/i.test(String(r[3]).trim()) };
 }
 function pinEq_(a, b) {
