@@ -968,7 +968,7 @@ function startCopy(src,i){
   toast("Copied. Change the strength or dosage form, then save.");
 }
 function wireEditor(){
-  $("#e_brand").addEventListener("change",()=>{ const mf=$("#e_mfr"); if (mf.value.trim()) return; const b=brandMfr().get($("#e_brand").value.trim().toLowerCase()); if (b && b.mfr){ mf.value=b.mfr; mf.dispatchEvent(new Event("input")); } });
+  $("#e_brand").addEventListener("input",()=>{ const mf=$("#e_mfr"); if (mf.value.trim() || document.activeElement===mf) return; const b=brandMfr().get($("#e_brand").value.trim().toLowerCase()); if (b && b.mfr){ mf.value=b.mfr; mf.dispatchEvent(new Event("input")); } });
   const upd=()=>{ readEditor(); $("#e_check").innerHTML=editorCheckHTML(S.edit.r); };
   ["e_brand","e_mfr","e_exp","e_qty","e_price"].forEach(id=>$("#"+id).addEventListener("input",upd));
   const d=$("#e_drug");
@@ -1319,9 +1319,9 @@ lsLoad(); render(); setSaveState("Connecting…");
   if (!S.mgr){ $("#btnAll").hidden=true; applyAllow(); }
   if (!db){ setSaveState("Saved on this device only"); return; }
   S.db=db;
-  db.doc("edpms/setup").onSnapshot(sn=>{ const d=sn.exists?sn.data():null; if (d&&Array.isArray(d.stores)&&d.stores.length){ S.stores=d.stores; } if (!S.mgr) applyAllow(); if (!myStores().some(s=>s.id===S.sid)) S.sid=myStores()[0]?.id; if(!S.edit) render(); }, e=>setSaveState("Could not load: "+(e.message||e.code)));
+  db.doc("edpms/setup").onSnapshot(sn=>{ const d=sn.exists?JSON.parse(JSON.stringify(sn.data())):null; if (d&&Array.isArray(d.stores)&&d.stores.length){ S.stores=d.stores; } if (!S.mgr) applyAllow(); if (!myStores().some(s=>s.id===S.sid)) S.sid=myStores()[0]?.id; if(!S.edit) render(); }, e=>setSaveState("Could not load: "+(e.message||e.code)));
   db.collection("edpms/setup/sheets").onSnapshot(sn=>{
-    const fresh={}; sn.docs.forEach(d=>{ const v=d.data(); if (v) fresh[d.id]=v; });
+    const fresh={}; sn.docs.forEach(d=>{ const v=d.data(); if (v) fresh[d.id]=JSON.parse(JSON.stringify(v)); }); // own copy: stored data can be read-only
     for (const id of pending) if (S.sheets[id]) fresh[id]=S.sheets[id];
     if (!S.ready){ // first load: keep edits saved on this device that never reached the shared store
       for (const id in S.sheets){ const l=S.sheets[id], r=fresh[id]; if (l && l.updatedAt && (!r || (r.updatedAt||"") < l.updatedAt)){ fresh[id]=l; pending.add(id); } }
