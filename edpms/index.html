@@ -851,7 +851,7 @@ function viewSheet(){
     <div class="tiles">
       ${tile("all","Items",n.all)}${tile("over","Above DOH price",n.over,n.over>0)}${tile("noref","Not in DOH lists",n.noref)}${tile("count",early()?"To count on "+fmtDate(P.cutoff):"No expiry or qty yet",n.count,!early()&&n.count>0)}${tile("miss",early()?"Needs fixing (library name)":"Needs fixing (library name, expiry, qty, price)",n.miss,n.miss>0)}${tile("exp","Expired",n.exp,n.exp>0)}
     </div>
-    ${canWork(sh)?"":`<div class="note"><b>${sh.status==="sub"?"Submitted for review.":"Locked."}</b> ${S.mgr?"":"You can't change items until the manager returns this sheet."}</div>`}
+    ${canWork(sh)?"":`<div class="note"><b>${sh.status==="sub"?"Submitted for review.":"Locked."}</b> ${S.mgr?"":"You can't change items until the manager returns this sheet."}${!S.mgr&&sh.status==="sub"?` <button class="b sm" data-act="takeback">Take back submission</button>`:""}</div>`}
     <div class="row" ${canWork(sh)?"":"hidden"}>
       <button class="b p" data-act="add">Add item</button>
       ${rows.length?`<button class="b ${S.count?"p":""}" data-act="countmode">${S.count?"Done counting":"Enter count"}</button>`:""}
@@ -991,10 +991,11 @@ function viewReview(sh){
   const st=sh.status||"prep", sub=sh.sub||{}, rev=sh.rev||{};
   let h=`<div class="panel"><div class="row"><h2 class="grow">Review</h2><span class="pill p-${sheetStatus(sh.store,sh.period).k}">${esc(sheetStatus(sh.store,sh.period).t)}</span></div>`;
   if (sub.at) h+=`<div class="sub">Submitted by <b>${esc(sub.by||"staff")}</b> on ${esc(new Date(sub.at).toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}</div>`;
+  if (sub.back && !sub.at) h+=`<div class="sub">Submission taken back by <b>${esc(sub.back.by||"staff")}</b> on ${esc(new Date(sub.back.at).toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))} to add or fix items</div>`;
   if (rev.at) h+=`<div class="note"><b>${rev.ok?"Approved":"Returned"} by ${esc(rev.by||"manager")}</b> on ${esc(new Date(rev.at).toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${rev.note?`<br>${esc(rev.note)}`:""}</div>`;
   if (!S.mgr){
     if (st==="prep"||st==="ret") h+=`<div class="row"><span class="grow sub">When all items, expiry dates and quantities as of ${perInfo(sh.period).cutLabel} are in, send this sheet to the manager.</span><button class="b p" data-act="submit">Submit for review</button></div>`;
-    else if (st==="sub") h+=`<div class="sub">Waiting for the manager's review.</div>`;
+    else if (st==="sub") h+=`<div class="row"><span class="grow sub">Waiting for the manager's review. Need to add or fix items? Take it back, then submit again.</span><button class="b" data-act="takeback">Take back submission</button></div>`;
   } else {
     h+=`<label class="f">Note to staff (optional)<input id="r_note" value="" placeholder="e.g. Check the expiry of Amoxicillin 500 mg"></label>
       <div class="row"><button class="b p" data-act="approve">Approve</button><button class="b" data-act="return">Return to staff</button></div>`;
@@ -1262,6 +1263,7 @@ document.addEventListener("click", async e=>{
       break; }
     case "xls": exportOne(); break;
     case "submit": { const s=sh(); s.status="sub"; s.sub={by:S.who||"Staff",at:new Date().toISOString()}; saveSheet(s); render(); toast("Sent to the manager for review"); break; }
+    case "takeback": { const s=sh(); if (s.status!=="sub"){ toast("The manager already reviewed this sheet"); render(); return; } s.status="prep"; s.sub={...(s.sub||{}), back:{by:S.who||"Staff",at:new Date().toISOString()}}; delete s.sub.at; saveSheet(s); render(); toast("Taken back. You can add and edit items again."); break; }
     case "approve": case "return": { const s=sh(); const note=($("#r_note")||{}).value||""; s.status=a==="approve"?"ok":"ret"; s.rev={by:S.who||"Manager",at:new Date().toISOString(),ok:a==="approve",note:note.trim()}; saveSheet(s); render(); toast(a==="approve"?"Approved":"Returned to staff"); break; }
     case "libfixall": { const s=sh(); let k=0; s.rows.forEach(r=>{ const f=libSuggest(r.drug); if(f){ r.drug=f; delete r.lg; delete r.ls; k++; } }); saveSheet(s); render(); toast(k+" names changed to the EDPMS library name"); break; }
     case "uselib": readEditor(); S.edit.r.drug=t.dataset.v; delete S.edit.r.lg; delete S.edit.r.ls; render(); break;
