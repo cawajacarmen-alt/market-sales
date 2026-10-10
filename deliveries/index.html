@@ -2,14 +2,14 @@
 /* Login for the bakery websites. Runs before the app script.
    Logins live in the owner's Google Sheet, tab "Staff logins" (Name, PIN, Sites, Manager). The Sheet script checks them.
    One login per phone covers every site the person may open; it ends at midnight or on Log out.
-   Sets window.WS_USER = {name, manager} for the app. Needs WS_SITE (this site's key) defined first. */
+   Sets window.WS_USER = {name, manager, sites} for the app. A site key may carry a part after a dash (edpms-mercedes = the EDPMS site, Mercedes branch only). Needs WS_SITE (this site's key) defined first. */
 (function () {
   var SITE = window.WS_SITE, SK = 'bakery.session', UK = 'bakery.users', SH = 'bakery.sheet';
   var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
   var set = function (k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
   var json = function (k, d) { try { return JSON.parse(get(k)) || d; } catch (e) { return d; } };
   var today = function () { return new Date().toLocaleDateString('en-CA'); };
-  var allowed = function (sites) { var s = String(sites || '').toLowerCase(); return !s.trim() || /\ball\b/.test(s) || s.split(/[\s,;]+/).indexOf(SITE) >= 0; };
+  var allowed = function (sites) { var s = String(sites || '').toLowerCase(); return !s.trim() || /\ball\b/.test(s) || s.split(/[\s,;]+/).some(function (x) { return x === SITE || x.indexOf(SITE + '-') === 0; }); };
   window.WS_SHEET = function () { return get(SH) || ''; };
   window.WS_SET_SHEET = function (u) { set(SH, u || null); };
   window.WS_LOGOUT = function () { set(SK, null); location.reload(); };
@@ -18,7 +18,7 @@
       var v = String(localStorage.getItem(k) || '').replace(/^"|"$/g, ''); if (/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { set(SH, v); break; } }
   } catch (e) {}
   var ses = json(SK, null);
-  if (ses && ses.day === today() && allowed(ses.sites)) { window.WS_USER = { name: ses.name, manager: !!ses.manager }; try { localStorage.setItem('breadorders.taker', JSON.stringify(ses.name)); } catch (e) {} }
+  if (ses && ses.day === today() && allowed(ses.sites)) { window.WS_USER = { name: ses.name, manager: !!ses.manager, sites: ses.sites || '' }; try { localStorage.setItem('breadorders.taker', JSON.stringify(ses.name)); } catch (e) {} }
   else if (ses && ses.open && ses.day === today()) { window.WS_USER = null; } // the Sheet script has no logins yet: open as before
   function hash(s) { // small non-reversible check for logging in again without internet on this phone
     var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36);
@@ -246,6 +246,27 @@ tr.void td a{text-decoration:line-through}
 .rc .sig div b{display:block;color:#1a1a1a;font-size:13px;margin-top:-24px;margin-bottom:8px;min-height:18px}
 .rc .foot{margin-top:14px;font-size:10.5px;color:#777;text-align:center}
 .rc .stamp{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) rotate(-18deg);border:5px solid #b8352b;color:#b8352b;font-family:var(--display);font-size:60px;font-weight:800;padding:2px 24px;opacity:.5;letter-spacing:.1em}
+/* Receipt-printer (thermal) layout: pure black on white, narrow, big text so it stays sharp on 58/80 mm paper. */
+.th{background:#fff;color:#000;font-family:"Public Sans",Arial,sans-serif;font-size:24px;line-height:1.3;padding:10px 6px 30px;font-weight:600}
+.th.w58{width:384px;font-size:20px}.th.w80{width:576px}
+.th.big{font-size:28px}.th.w58.big{font-size:23px}
+.th .c{text-align:center}.th .b{font-weight:800}
+.th .biz{font-size:1.25em;font-weight:800;text-align:center;line-height:1.15}
+.th .ttl{font-size:1.1em;font-weight:800;text-align:center;margin-top:6px;letter-spacing:.04em}
+.th .no{font-size:1.35em;font-weight:800;text-align:center}
+.th .copy{text-align:center;font-weight:800;border:3px solid #000;padding:2px;margin:6px 0}
+.th hr{border:0;border-top:3px dashed #000;margin:8px 0}
+.th .r{display:flex;justify-content:space-between;gap:10px}.th .r>span:last-child{text-align:right;white-space:nowrap}
+.th .it{margin-top:4px}.th .it .r{font-weight:500}
+.th .tot{font-size:1.15em;font-weight:800}
+.th .sig{margin-top:34px;text-align:center}
+.th .sig b{display:block;border-bottom:3px solid #000;min-height:1.3em;padding-bottom:2px}
+.th .void{text-align:center;font-size:1.6em;font-weight:800;border:4px solid #000;margin:6px 0}
+.th .sm{font-size:.8em;font-weight:500}
+.prset{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.prset label{display:flex;flex-direction:column;gap:4px;font-size:.78rem;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.prset select{text-transform:none;letter-spacing:0;font-weight:400}
+.preview.thp{display:flex;justify-content:center;background:#e9ecef}
 @media (max-width:620px){
   .tiles{grid-template-columns:repeat(2,1fr)}
   h1{font-size:1.55rem}
@@ -261,8 +282,9 @@ tr.void td a{text-decoration:line-through}
 <div class="wrap">
   <header>
     <h1><small>Main store to branches</small>Branch Deliveries</h1>
-    <span class="sync" id="sync">Loading…</span>
+    <span class="bar"><span class="sync" id="sync">Loading…</span><button class="btn sm" id="prBtn" aria-expanded="false">🖨 Printer</button></span>
   </header>
+  <div id="prPanel" hidden></div>
 
   <nav role="tablist">
     <button id="tab-day" role="tab" aria-selected="true" data-tab="day">Deliveries</button>
@@ -901,7 +923,7 @@ function renderDay(){
     }</tbody><tfoot><tr><td>Total</td><td style="text-align:left">${live_.length} trip${live_.length===1?"":"s"}</td><td></td><td>${fmt(t.sent)}</td><td>${fmt(t.pulled)}</td><td>${fmt(t.damaged)}</td><td>${peso(t.vSent)}</td><td></td></tr></tfoot></table>`
       :`<div class="empty">No deliveries to ${esc(bname(bid))} on this day yet. Tap <b>+ New delivery</b> each time the driver leaves with bread. Every delivery gets its own receipt.</div>`}</div>
     ${live_.length?dayItemsHTML(d,bid,live_):""}
-    ${live_.length?`<div class="printbar"><button class="btn" id="slipOne">Save day summary PDF</button><button class="btn" id="recsOne">Save all ${live_.length} receipt${live_.length===1?"":"s"} as PDF</button></div>`:""}`;
+    ${live_.length?`<div class="printbar">${canDirect()?`<button class="btn primary" id="prSlipOne">🖨 Print day summary</button><button class="btn primary" id="prRecsOne">🖨 Print all ${live_.length} receipt${live_.length===1?"":"s"}</button>`:""}<button class="btn" id="slipOne">Save day summary PDF</button><button class="btn" id="recsOne">Save all ${live_.length} receipt${live_.length===1?"":"s"} as PDF</button></div>`:""}`;
   tiles($("dTiles"),t,live_.length+" trip"+(live_.length===1?"":"s")+" today");
   renderDayAll();
 }
@@ -985,13 +1007,13 @@ function voidTrip(id){
 }
 
 /* ---------- receipt (always light, fixed width so the PDF looks the same from any phone) ---------- */
-function recHTML(t){
+function recHTML(t,copy){
   const d=t.date, ids=orderIds(Object.keys(t.items||{}),S.items), tt=tripTotals(t), idx=tripIndex(d,t);
   const back=ids.filter(iid=>{ const q=qtyOf(t.items[iid]); return q.pulled||q.damaged; });
   return `<div class="rc">
     ${t.void?`<div class="stamp">VOID</div>`:""}
     <div class="top"><div class="biz"><b>${esc(S.main||"Main store")}</b><span>Production delivery of finished products to branch</span></div>
-      <div class="no"><div class="t">Delivery Receipt</div><div class="n">No. ${recNo(t.no)}</div><div class="d">${esc(nice(d))}${t.time?" · "+timeTxt(t.time):""}</div></div></div>
+      <div class="no"><div class="t">Delivery Receipt</div><div class="n">No. ${recNo(t.no)}</div><div class="d">${esc(nice(d))}${t.time?" · "+timeTxt(t.time):""}</div>${copy?`<div class="d" style="font-weight:800;color:#1f5f99">${copy}</div>`:""}</div></div>
     <div class="flds">
       <div class="fld"><span class="k">Delivered to</span><span class="v">${esc(bname(t.bid))}</span></div>
       <div class="fld"><span class="k">Trip</span><span class="v">${idx>0?idx+" of the day":""}</span></div>
@@ -1012,12 +1034,12 @@ function recHTML(t){
 function recCard(t){
   return `<div class="card" id="recCard">
     <div class="bar" style="justify-content:space-between"><h3>Receipt ${recNo(t.no)} ${t.void?`<span class="pill hi">Void</span>`:""}</h3><button class="btn sm" id="recClose">Close</button></div>
-    <div class="bar"><button class="btn primary" data-recpdf="${t.id}">Save receipt PDF to print</button>${t.void?"":`<button class="btn" data-edit="${t.id}">Edit</button>`}</div>
-    <div class="preview">${recHTML(t)}</div>
-    <p class="note">To print: save the PDF, open it, then use Print or Share › Print. Print two copies: one for the branch, one for the main store.</p>
+    <div class="bar">${canDirect()?`<button class="btn primary" data-recprint="${t.id}">🖨 Print now</button><button class="btn" data-recpdf="${t.id}">Save PDF</button>`:`<button class="btn primary" data-recpdf="${t.id}">Save receipt to print</button>`}${t.void?"":`<button class="btn" data-edit="${t.id}">Edit</button>`}<span class="sync">${esc(PAPERS[PR.paper].label)} · ${PR.copies} cop${PR.copies==="1"?"y":"ies"}</span></div>
+    <div class="preview${thermal()?" thp":""}">${thermal()?thRecHTML(t,(COPY_LABELS[PR.copies]||[""])[0]):recHTML(t)}</div>
+    <p class="note">${canDirect()?"<b>Print now</b> sends the receipt straight to the <b>RawBT</b> app, which prints it on your thermal printer. Change paper or copies with 🖨 Printer at the top.":thermal()?"To print: save, open the PDF, then Share › <b>RawBT</b>. Change paper or copies with 🖨 Printer at the top.":"To print: save the PDF, open it, then use Print or Share › Print. Change paper or copies with 🖨 Printer at the top."}</p>
   </div>`;
 }
-function fitPreviews(){ document.querySelectorAll(".wrap .preview").forEach(p=>{ const rc=p.firstElementChild; if(!rc) return; const k=Math.min(1,(p.clientWidth-24)/640); rc.style.zoom=k>0?k:1; }); }
+function fitPreviews(){ document.querySelectorAll(".wrap .preview").forEach(p=>{ const rc=p.firstElementChild; if(!rc) return; const nat=rc.classList.contains("th")?(rc.classList.contains("w58")?384:576):640, k=Math.min(1,(p.clientWidth-24)/nat); rc.style.zoom=k>0?k:1; }); }
 window.addEventListener("resize",fitPreviews);
 
 function renderDayAll(){
@@ -1054,6 +1076,69 @@ function slipHTML(d,bid){
   </div>`;
 }
 
+/* ---------- printer settings (kept on this device: each tablet has its own printer) ---------- */
+const PAPERS={"80":{w:80,label:"80 mm receipt printer"},"58":{w:58,label:"58 mm receipt printer"},"a5":{w:148,label:"Half sheet (A5)"},"a4":{w:210,label:"Full page (A4)"}};
+const PR=Object.assign({paper:"a5",size:"n",copies:"1"},(()=>{ try{ return JSON.parse(localStorage.getItem(LS+".printer")||"{}"); }catch(e){ return {}; } })());
+if(!PAPERS[PR.paper]) PR.paper="a5";
+const thermal=()=>PR.paper==="80"||PR.paper==="58";
+function savePR(){ try{ localStorage.setItem(LS+".printer",JSON.stringify(PR)); }catch(e){} }
+const COPY_LABELS={"1":[""],"2":["BRANCH COPY","MAIN STORE COPY"],"3":["BRANCH COPY","MAIN STORE COPY","DRIVER COPY"]};
+function renderPrinter(){
+  const el=$("prPanel"); if(el.hidden) return;
+  el.innerHTML=`<div class="card"><div class="bar" style="justify-content:space-between"><h2>Printer settings</h2><button class="btn sm" id="prClose">Done</button></div>
+    <div class="prset">
+      <label>Paper<select id="prPaper">${Object.keys(PAPERS).map(k=>`<option value="${k}"${PR.paper===k?" selected":""}>${PAPERS[k].label}</option>`).join("")}</select></label>
+      <label>Text size<select id="prSize"><option value="n"${PR.size==="n"?" selected":""}>Normal</option><option value="l"${PR.size==="l"?" selected":""}>Large</option></select></label>
+      <label>Copies of each receipt<select id="prCopies">${["1","2","3"].map(k=>`<option value="${k}"${PR.copies===k?" selected":""}>${k==="1"?"1 copy":k==="2"?"2 copies (branch + main store)":"3 copies (branch + main store + driver)"}</option>`).join("")}</select></label>
+    </div>
+    <p class="note">Saved on this tablet only, so each device can use its own printer. For a receipt printer (58 or 80 mm), receipts and day summaries come out as a narrow black-and-white slip. To print: tap Save receipt, open the PDF, then Share › <b>RawBT</b> (or Print › RawBT).</p></div>`;
+}
+$("prBtn").onclick=()=>{ const el=$("prPanel"); el.hidden=!el.hidden; $("prBtn").setAttribute("aria-expanded",!el.hidden); renderPrinter(); };
+$("prPanel").addEventListener("click",e=>{ if(e.target.id==="prClose"){ $("prPanel").hidden=true; $("prBtn").setAttribute("aria-expanded","false"); } });
+$("prPanel").addEventListener("change",e=>{ const id=e.target.id, v=e.target.value;
+  if(id==="prPaper") PR.paper=v; else if(id==="prSize") PR.size=v; else if(id==="prCopies") PR.copies=v; else return;
+  savePR(); toast("Printer: "+PAPERS[PR.paper].label); if(S.tab==="day") renderDay(); });
+const thCls=()=>"th w"+PR.paper+(PR.size==="l"?" big":"");
+function thRecHTML(t,copy){
+  const d=t.date, ids=orderIds(Object.keys(t.items||{}),S.items), tt=tripTotals(t), idx=tripIndex(d,t);
+  const back=ids.filter(iid=>{ const q=qtyOf(t.items[iid]); return q.pulled||q.damaged; });
+  const R=(a,b)=>`<div class="r"><span>${a}</span><span>${b}</span></div>`;
+  return `<div class="${thCls()}">
+    <div class="biz">${esc(S.main||"Main store")}</div>
+    <div class="ttl">DELIVERY RECEIPT</div>
+    <div class="no">${recNo(t.no)}</div>
+    ${copy?`<div class="copy">${copy}</div>`:""}
+    ${t.void?`<div class="void">VOID</div>`:""}
+    <hr>
+    ${R("Date",esc(short(d)))}${t.time?R("Time",timeTxt(t.time)):""}
+    ${R("To",esc(bname(t.bid)))}${idx>0?R("Trip",idx+" of the day"):""}${t.driver?R("Driver",esc(t.driver)):""}
+    <hr>
+    ${ids.filter(iid=>qtyOf(t.items[iid]).sent).map(iid=>{ const q=qtyOf(t.items[iid]), p=priceOf(t.items[iid],iid);
+      return `<div class="it"><div class="b">${esc(iname(iid))}</div>${R(fmt(q.sent)+" x "+(p?amt2(p):"–"),amt2(q.sent*p))}</div>`; }).join("")}
+    <hr>
+    <div class="tot">${R("TOTAL",fmt(tt.sent)+" pcs")}${R("AMOUNT","₱"+amt2(tt.vSent))}</div>
+    ${back.length?`<hr><div class="b">BROUGHT BACK</div>${back.map(iid=>{ const q=qtyOf(t.items[iid]); return `<div class="it"><div class="b">${esc(iname(iid))}</div>${q.pulled?R("Pulled out",fmt(q.pulled)):""}${q.damaged?R("Damaged",fmt(q.damaged)):""}</div>`; }).join("")}`:""}
+    ${t.note?`<hr><div>Notes: ${esc(t.note)}</div>`:""}
+    <div class="sig"><b>${esc(t.by||"")}</b>Issued by (production)</div>
+    <div class="sig"><b>${esc(t.driver||"")}</b>Delivered by (driver)</div>
+    <div class="sig"><b></b>Received by (branch)</div>
+    <div class="c sm" style="margin-top:10px">Count the bread on arrival before signing.</div>
+  </div>`;
+}
+function thSlipHTML(d,bid){
+  const trips=tripsOf(d,bid).filter(x=>!x.void), ids=orderIds(Object.keys((((S.days[d]||{}).rows)||{})[bid]||{}),S.items);
+  const list=ids.map(iid=>Object.assign({iid},cell(d,bid,iid))), t=sum(list);
+  const R=(a,b)=>`<div class="r"><span>${a}</span><span>${b}</span></div>`;
+  return `<div class="${thCls()}">
+    <div class="biz">${esc(S.main||"Main store")}</div><div class="ttl">DAY SUMMARY</div>
+    <hr>${R("Date",esc(short(d)))}${R("Branch",esc(bname(bid)))}${R("Trips",trips.length)}
+    <div class="sm">${trips.map(x=>recNo(x.no)).join(", ")}</div><hr>
+    ${list.map(c=>`<div class="it"><div class="b">${esc(iname(c.iid))}</div>${R("Delivered",fmt(c.sent))}${c.pulled?R("Pulled out",fmt(c.pulled)):""}${c.damaged?R("Damaged",fmt(c.damaged)):""}${R("Net",fmt(c.sent-c.pulled-c.damaged))}</div>`).join("")}
+    <hr><div class="tot">${R("DELIVERED",fmt(t.sent))}${R("NET",fmt(t.net))}${R("AMOUNT","₱"+amt2(t.vSent))}${R("NET AMT","₱"+amt2(t.vNet))}</div>
+    <div class="sig"><b></b>Prepared by (main store)</div><div class="sig"><b></b>Branch in-charge</div>
+  </div>`;
+}
+
 /* ---------- PDF ---------- */
 async function saveFile(name,blob){
   const dl=window.claude&&claude.use?await claude.use("downloads"):null;
@@ -1072,20 +1157,50 @@ async function makePDF(pages,name){ // pages: [{html, w (mm)}]; each page is as 
     let pdf=null;
     for(const p of pages){
       box.innerHTML=p.html;
-      const c=await html2canvas(box.firstElementChild,{scale:2,backgroundColor:"#ffffff",logging:false}); box.innerHTML="";
-      const h=Math.round(p.w*c.height/c.width*10)/10, fmtp=[p.w,Math.max(h,60)];
+      const c=await html2canvas(box.firstElementChild,{scale:p.th?1:2,backgroundColor:"#ffffff",logging:false}); box.innerHTML="";
+      const h=Math.round(p.w*c.height/c.width*10)/10, fmtp=[p.w,Math.max(h,p.th?20:60)];
       if(!pdf) pdf=new J({unit:"mm",format:fmtp,orientation:"portrait"}); else pdf.addPage(fmtp,"portrait");
-      pdf.addImage(c.toDataURL("image/jpeg",.92),"JPEG",0,0,p.w,h);
+      pdf.addImage(p.th?c.toDataURL("image/png"):c.toDataURL("image/jpeg",.92),p.th?"PNG":"JPEG",0,0,p.w,h);
     }
     await saveFile(name,pdf.output("blob"));
   }catch(e){ box.innerHTML=""; toast("Could not make the PDF."); }
 }
+// Website only: send thermal receipts straight to the RawBT app as ESC/POS (raster image + cut).
+function canDirect(){ return !!window.WS_SITE&&thermal(); }
+function escpos(canvases,dots){
+  const out=[0x1b,0x40];
+  for(const src of canvases){
+    const k=dots/src.width, H=Math.max(1,Math.round(src.height*k)), c=document.createElement("canvas"); c.width=dots; c.height=H;
+    const g=c.getContext("2d"); g.fillStyle="#fff"; g.fillRect(0,0,dots,H); g.drawImage(src,0,0,dots,H);
+    const px=g.getImageData(0,0,dots,H).data, bw=dots/8;
+    for(let y0=0;y0<H;y0+=128){ const h=Math.min(128,H-y0);
+      out.push(0x1d,0x76,0x30,0,bw&255,bw>>8,h&255,h>>8);
+      for(let y=y0;y<y0+h;y++) for(let xb=0;xb<bw;xb++){ let v=0; for(let b=0;b<8;b++){ const i=(y*dots+xb*8+b)*4; if(px[i]*.3+px[i+1]*.59+px[i+2]*.11<160) v|=128>>b; } out.push(v); } }
+    out.push(0x1b,0x64,4,0x1d,0x56,0x42,0);
+  }
+  return new Uint8Array(out);
+}
+async function printDirect(pages){
+  if(!window.html2canvas){ toast("The print tool did not load. Check your connection and try again."); return; }
+  toast("Sending to printer…");
+  const box=$("cap"), cs=[];
+  try{
+    if(document.fonts&&document.fonts.ready) await document.fonts.ready;
+    for(const p of pages){ box.innerHTML=p.html; cs.push(await html2canvas(box.firstElementChild,{scale:1,backgroundColor:"#ffffff",logging:false})); box.innerHTML=""; }
+    const bytes=escpos(cs,PR.paper==="58"?384:576); let bin=""; for(let i=0;i<bytes.length;i+=8192) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+    location.href="intent:base64,"+btoa(bin)+"#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
+  }catch(e){ box.innerHTML=""; toast("Could not send to the printer. Use Save PDF instead."); }
+}
+function printReceipts(list){ list=list.filter(Boolean); if(!list.length){ toast("No receipts to print."); return; }
+  const copies=COPY_LABELS[PR.copies]||[""]; printDirect(list.flatMap(t=>copies.map(cp=>({html:thRecHTML(t,cp)})))); }
 const safe=s=>String(s).replace(/[^\w-]+/g,"_");
-function saveReceipts(list,name){ list=list.filter(Boolean); if(!list.length){ toast("No receipts to save."); return; } makePDF(list.map(t=>({html:recHTML(t),w:148})),name); }
+function saveReceipts(list,name){ list=list.filter(Boolean); if(!list.length){ toast("No receipts to save."); return; }
+  const w=PAPERS[PR.paper].w, copies=COPY_LABELS[PR.copies]||[""], multi=copies.length>1;
+  makePDF(list.flatMap(t=>copies.map(cp=>thermal()?{html:thRecHTML(t,cp),w,th:true}:{html:recHTML(t,multi?cp:""),w})),name); }
 function saveSlips(d,bids){
   bids=bids.filter(b=>tripsOf(d,b).some(x=>!x.void));
   if(!bids.length){ toast("Nothing logged for this day yet."); return; }
-  makePDF(bids.map(b=>({html:slipHTML(d,b),w:210})),"Delivery_Summary_"+d+(bids.length===1?"_"+safe(bname(bids[0])):"_all_branches")+".pdf");
+  makePDF(bids.map(b=>thermal()?{html:thSlipHTML(d,b),w:PAPERS[PR.paper].w,th:true}:{html:slipHTML(d,b),w:210}),"Delivery_Summary_"+d+(bids.length===1?"_"+safe(bname(bids[0])):"_all_branches")+".pdf");
 }
 
 /* ---------- render: report ---------- */
@@ -1217,7 +1332,10 @@ $("dBody").addEventListener("click",e=>{
   if(b.dataset.rec){ e.preventDefault(); S.showRec=b.dataset.rec; S.form=null; renderDay(); const el=$("recCard"); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); return; }
   if(b.id==="recClose"){ S.showRec=null; return renderDay(); }
   if(b.dataset.edit){ const t=find(b.dataset.edit); if(t) openForm(t); return; }
+  if(b.dataset.recprint){ const t=find(b.dataset.recprint); if(t) printReceipts([t]); return; }
   if(b.dataset.recpdf){ const t=find(b.dataset.recpdf); if(t) saveReceipts([t],"Delivery_Receipt_"+recNo(t.no)+"_"+safe(bname(t.bid))+".pdf"); return; }
+  if(b.id==="prSlipOne"){ if(tripsOf(S.dDate,S.dBranch).some(x=>!x.void)) printDirect([{html:thSlipHTML(S.dDate,S.dBranch)}]); return; }
+  if(b.id==="prRecsOne") return printReceipts(tripsOf(S.dDate,S.dBranch).filter(x=>!x.void));
   if(b.id==="slipOne") return saveSlips(S.dDate,[S.dBranch]);
   if(b.id==="recsOne") return saveReceipts(tripsOf(S.dDate,S.dBranch).filter(x=>!x.void),"Delivery_Receipts_"+S.dDate+"_"+safe(bname(S.dBranch))+".pdf");
 });
