@@ -201,7 +201,8 @@ td a{color:inherit}
 .slip .sig div{flex:1;text-align:center;font-size:12px;color:#555;border-top:1px solid #1a1a1a;padding-top:4px}
 .slip .sig div b{display:block;color:#1a1a1a;font-size:13px;margin-top:-26px;margin-bottom:10px;min-height:18px}
 .slip .foot{margin-top:18px;font-size:10.5px;color:#777;text-align:center}
-#cap{position:fixed;left:-10000px;top:0}
+#cap{position:fixed;left:-10000px;top:0;width:max-content}
+#cap,#cap *{-webkit-text-size-adjust:none!important;text-size-adjust:none!important}
 .printbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .lots{display:flex;flex-direction:column;gap:6px}
 .lot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:.88rem;padding:8px 10px;border:1px dashed var(--line);border-radius:8px}
@@ -1146,6 +1147,10 @@ async function saveFile(name,blob){
   try{ await dl.save({filename:name,data:blob}); toast("PDF ready. Open it to print."); }
   catch(e){ if(!e||e.code!=="declined") toast("Could not save the file."); }
 }
+// Android Chrome can enlarge text (large font setting) differently in the page and in html2canvas's copy, which cut receipts off; turn that off and size the capture to the receipt itself.
+function snap(el,scale){ const w=Math.ceil(el.offsetWidth), h=Math.ceil(el.offsetHeight);
+  return html2canvas(el,{scale,backgroundColor:"#ffffff",logging:false,width:w,height:h,windowWidth:Math.max(1400,w+40),windowHeight:Math.max(1000,h+40),scrollX:0,scrollY:0,
+    onclone:d=>{ const st=d.createElement("style"); st.textContent="html,body,*{-webkit-text-size-adjust:none!important;text-size-adjust:none!important}"; d.head.appendChild(st); }}); }
 // window.print() is blocked inside the artifact frame, so printing goes through a PDF.
 async function makePDF(pages,name){ // pages: [{html, w (mm)}]; each page is as tall as its content
   const J=window.jspdf&&window.jspdf.jsPDF;
@@ -1157,7 +1162,7 @@ async function makePDF(pages,name){ // pages: [{html, w (mm)}]; each page is as 
     let pdf=null;
     for(const p of pages){
       box.innerHTML=p.html;
-      const c=await html2canvas(box.firstElementChild,{scale:p.th?1:2,backgroundColor:"#ffffff",logging:false}); box.innerHTML="";
+      const c=await snap(box.firstElementChild,p.th?1:2); box.innerHTML="";
       const h=Math.round(p.w*c.height/c.width*10)/10, fmtp=[p.w,Math.max(h,p.th?20:60)];
       if(!pdf) pdf=new J({unit:"mm",format:fmtp,orientation:"portrait"}); else pdf.addPage(fmtp,"portrait");
       pdf.addImage(p.th?c.toDataURL("image/png"):c.toDataURL("image/jpeg",.92),p.th?"PNG":"JPEG",0,0,p.w,h);
@@ -1186,7 +1191,7 @@ async function printDirect(pages){
   const box=$("cap"), cs=[];
   try{
     if(document.fonts&&document.fonts.ready) await document.fonts.ready;
-    for(const p of pages){ box.innerHTML=p.html; cs.push(await html2canvas(box.firstElementChild,{scale:1,backgroundColor:"#ffffff",logging:false})); box.innerHTML=""; }
+    for(const p of pages){ box.innerHTML=p.html; cs.push(await snap(box.firstElementChild,1)); box.innerHTML=""; }
     const bytes=escpos(cs,PR.paper==="58"?384:576); let bin=""; for(let i=0;i<bytes.length;i+=8192) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
     location.href="intent:base64,"+btoa(bin)+"#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
   }catch(e){ box.innerHTML=""; toast("Could not send to the printer. Use Save PDF instead."); }
