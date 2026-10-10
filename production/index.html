@@ -2,14 +2,14 @@
 /* Login for the bakery websites. Runs before the app script.
    Logins live in the owner's Google Sheet, tab "Staff logins" (Name, PIN, Sites, Manager). The Sheet script checks them.
    One login per phone covers every site the person may open; it ends at midnight or on Log out.
-   Sets window.WS_USER = {name, manager} for the app. Needs WS_SITE (this site's key) defined first. */
+   Sets window.WS_USER = {name, manager, sites} for the app. A site key may carry a part after a dash (edpms-mercedes = the EDPMS site, Mercedes branch only). Needs WS_SITE (this site's key) defined first. */
 (function () {
   var SITE = window.WS_SITE, SK = 'bakery.session', UK = 'bakery.users', SH = 'bakery.sheet';
   var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
   var set = function (k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
   var json = function (k, d) { try { return JSON.parse(get(k)) || d; } catch (e) { return d; } };
   var today = function () { return new Date().toLocaleDateString('en-CA'); };
-  var allowed = function (sites) { var s = String(sites || '').toLowerCase(); return !s.trim() || /\ball\b/.test(s) || s.split(/[\s,;]+/).indexOf(SITE) >= 0; };
+  var allowed = function (sites) { var s = String(sites || '').toLowerCase(); return !s.trim() || /\ball\b/.test(s) || s.split(/[\s,;]+/).some(function (x) { return x === SITE || x.indexOf(SITE + '-') === 0; }); };
   window.WS_SHEET = function () { return get(SH) || ''; };
   window.WS_SET_SHEET = function (u) { set(SH, u || null); };
   window.WS_LOGOUT = function () { set(SK, null); location.reload(); };
@@ -18,7 +18,7 @@
       var v = String(localStorage.getItem(k) || '').replace(/^"|"$/g, ''); if (/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/.test(v)) { set(SH, v); break; } }
   } catch (e) {}
   var ses = json(SK, null);
-  if (ses && ses.day === today() && allowed(ses.sites)) { window.WS_USER = { name: ses.name, manager: !!ses.manager }; try { localStorage.setItem('breadorders.taker', JSON.stringify(ses.name)); } catch (e) {} }
+  if (ses && ses.day === today() && allowed(ses.sites)) { window.WS_USER = { name: ses.name, manager: !!ses.manager, sites: ses.sites || '' }; try { localStorage.setItem('breadorders.taker', JSON.stringify(ses.name)); } catch (e) {} }
   else if (ses && ses.open && ses.day === today()) { window.WS_USER = null; } // the Sheet script has no logins yet: open as before
   function hash(s) { // small non-reversible check for logging in again without internet on this phone
     var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36);
@@ -313,7 +313,7 @@ td.sub2{white-space:normal}
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<script>window.WS_CFG={"app": "prd", "name": "Bakery Production", "split": [["^bakery/log/days/", {"orders": "map"}]], "seed": {"bakery/log": {"bakers": [{"id": "kmusca9l7p0o", "name": "NILo"}], "products": [{"id": "bmusdj511eke", "name": "Monay", "price": 5, "yield": 500}, {"id": "bmusdk1be8eb", "name": "Pandesal Malunggay", "price": 5, "yield": 50}, {"id": "bmusc9xgyo97", "name": "Buko Pie", "price": 180, "yield": 8}]}}, "minV": 4, "feeds": {"dlv": {"prefix": ["delivery/setup"], "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]]}, "ord": {"prefix": ["days/", "app/setup"], "split": [["^days/", {"orders": "map", "collections": "map"}]]}}, "local": "^bakery/(log/links/|sync$)"};
+<script>window.WS_CFG={"app": "prd", "name": "Bakery Production", "split": [["^bakery/log/days/", {"orders": "map"}]], "seed": {"bakery/log": {"bakers": [{"id": "kmusca9l7p0o", "name": "NILo"}], "products": [{"id": "bmusdj511eke", "name": "Monay", "price": 5, "yield": 500}, {"id": "bmusdk1be8eb", "name": "Pandesal Malunggay", "price": 5, "yield": 50}, {"id": "bmusc9xgyo97", "name": "Buko Pie", "price": 180, "yield": 8}]}}, "minV": 4, "feeds": {"dlv": {"prefix": ["delivery/setup"], "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]]}, "ord": {"prefix": ["days/", "app/setup"], "split": [["^days/", {"orders": "map", "collections": "map"}]]}}, "local": "^bakery/(log/links/|sync$)", "clear": {"re": "^bakery/log/days/", "what": "production entry (all days)", "keep": "Breads, bakers and yields"}};
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
 // change different orders or receipts on the same day both keep their change.
@@ -614,6 +614,7 @@ function wsMasterItems(items, products) {
       (mgr || LOGIN ? '' : '<h3>Manager PIN</h3><div class="r"><input id="wspin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN"><button class="p" id="wsgo">Unlock</button></div>') +
       (mgr ? (LOGIN ? '' : '<h3>Manager PIN</h3><p>' + (pin() ? 'A PIN is set. Staff see only today until someone unlocks with it. Type a new one to change it.' : 'No PIN yet, so anyone with this page can see past days and reports. Set a PIN only you know.') + '</p><div class="r"><input id="wsnew" type="password" inputmode="numeric" autocomplete="off" placeholder="New PIN"><button class="p" id="wsset">Save PIN</button></div>') +
         '<h3>Google Sheet</h3><p>' + (sheet ? 'Connected. Entries are shared with your Google Sheet and every phone or computer connected to it.' : 'Not connected. Entries stay only on this phone. Paste the Web app URL from your Google Sheet to share them.') + '</p>' +
+        (C.clear ? '<h3>Delete all entries</h3><p>Deletes every ' + C.clear.what + ' on this phone and on every phone connected to the Google Sheet. ' + C.clear.keep + ' stay. This cannot be undone.</p><div class="r"><input id="wsdelc" autocomplete="off" placeholder="Type DELETE"><button id="wsdel">Delete all entries</button></div>' : '') +
         '<div class="r"><input id="wsurl" placeholder="https://script.google.com/macros/s/…/exec" value="' + (sheet || '').replace(/"/g, '') + '"><button class="p" id="wscon">Connect</button></div>' + (sheet ? '<div class="r"><button id="wsoff">Disconnect this phone</button></div>' : '') : '') +
       '<div class="r" style="justify-content:flex-end">' + (mgr && pin() && !LOGIN ? '<button id="wslock">Lock (staff view)</button>' : '') + '<button id="wsx">Close</button></div></div></div>');
     document.body.appendChild(p);
@@ -623,6 +624,17 @@ function wsMasterItems(items, products) {
       q('#wsgo').onclick = go; q('#wspin').onkeydown = function (e) { if (e.key === 'Enter') go(); }; q('#wspin').focus(); }
     if (q('#wsset')) q('#wsset').onclick = function () { var v = q('#wsnew').value.trim(); if (v.length < 4) { toast('Use at least 4 digits.'); return; } lsSet(PIN, v); try { sessionStorage.setItem(UNL, '1'); } catch (e) {} toast('PIN saved. Tap Lock before handing the phone to staff.'); close(); render(); };
     if (q('#wslock')) q('#wslock').onclick = function () { try { sessionStorage.removeItem(UNL); } catch (e) {} location.reload(); };
+    if (q('#wsdel')) q('#wsdel').onclick = function () {
+      if (q('#wsdelc').value.trim().toUpperCase() !== 'DELETE') { toast('Type DELETE in the box first.'); return; }
+      if (!confirm('Delete every ' + C.clear.what + '? This cannot be undone.')) return;
+      var re = new RegExp(C.clear.re), go = function () {
+        var ps = Object.keys(recs).filter(function (x) { return re.test(x) && !isLocal(x) && docOf(x); });
+        ps.forEach(function (x) { recs[x] = wsStamp(recs[x], null, sp(x), now()); pend[x] = 1; });
+        saveAll(); changed(ps); queuePush(); setTimeout(derive, 300);
+        toast(ps.length ? 'Deleted entries for ' + ps.length + ' day' + (ps.length === 1 ? '' : 's') + '.' : 'There were no entries to delete.'); close();
+      };
+      toast('Deleting…'); (sheet ? pull().then(go, go) : go());
+    };
     if (q('#wsoff')) q('#wsoff').onclick = function () { if (!confirm('Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.')) return; sheet = ''; lsSet(LS + '.sheet', null); if (window.WS_SET_SHEET) window.WS_SET_SHEET(null); close(); status(); };
     if (q('#wscon')) q('#wscon').onclick = function () {
       var v = q('#wsurl').value.trim();
