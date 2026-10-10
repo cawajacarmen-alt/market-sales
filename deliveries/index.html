@@ -1164,7 +1164,8 @@ async function makePDF(pages,name){ // pages: [{html, w (mm)}]; each page is as 
       box.innerHTML=p.html;
       const c=await snap(box.firstElementChild,p.th?1:2); box.innerHTML="";
       const h=Math.round(p.w*c.height/c.width*10)/10, fmtp=[p.w,Math.max(h,p.th?20:60)];
-      if(!pdf) pdf=new J({unit:"mm",format:fmtp,orientation:"portrait"}); else pdf.addPage(fmtp,"portrait");
+      const ori=fmtp[0]>fmtp[1]?"landscape":"portrait"; // jsPDF swaps the sides to match, so a wide receipt needs landscape
+      if(!pdf) pdf=new J({unit:"mm",format:fmtp,orientation:ori}); else pdf.addPage(fmtp,ori);
       pdf.addImage(p.th?c.toDataURL("image/png"):c.toDataURL("image/jpeg",.92),p.th?"PNG":"JPEG",0,0,p.w,h);
     }
     await saveFile(name,pdf.output("blob"));
