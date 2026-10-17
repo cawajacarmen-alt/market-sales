@@ -238,12 +238,13 @@ td.sub2{white-space:normal}
         <label class="wide">Note<input id="oNote" placeholder="Optional, e.g. for market branch"></label>
       </div>
       <div class="bar"><button class="btn primary" type="submit">Create order</button><span class="note" id="oExp"></span></div>
+      <div class="bar" id="oCopy" hidden></div>
     </form>
     <div class="bar" id="oFilter"></div>
     <div id="oList" style="display:flex;flex-direction:column;gap:10px"></div>
     <h2>Day summary by bread</h2>
     <div class="sheet" id="dSheet"></div>
-    <p class="note">Each order goes through 4 steps: <b>Ordered</b> (assigned to a baker), <b>Baking</b> (baker started), <b>Counted</b> (production team counts the yield output), <b>Inspected</b> (after baking, pieces that pass quality inspection are released for delivery; damaged pieces are not released). Expected = batches × yield per batch from Breads &amp; bakers.</p>
+    <p class="note">On a day with no orders yet, <b>Same as</b> copies the last day's orders (bread, batches, baker) so you only adjust what changed. Each order goes through 4 steps: <b>Ordered</b> (assigned to a baker), <b>Baking</b> (baker started), <b>Counted</b> (production team counts the yield output), <b>Inspected</b> (after baking, pieces that pass quality inspection are released for delivery; damaged pieces are not released). Expected = batches × yield per batch from Breads &amp; bakers.</p>
   </section>
 
   <!-- TALLY -->
@@ -832,7 +833,7 @@ function renderDay(){
    <div class="tile"><span class="k"><i style="background:var(--made)"></i>Counted</span><span class="v">${fmt(t.made)}</span><span class="s">${t.expected?"of "+fmt(t.expected)+" expected":"pieces of yield output"}</span></div>
    <div class="tile"><span class="k"><i style="background:var(--rel)"></i>Released</span><span class="v">${fmt(t.released)}</span><span class="s">passed inspection${waiting?" · "+fmt(waiting)+" waiting":""}</span></div>
    <div class="tile"><span class="k"><i style="background:var(--dmg)"></i>Damaged</span><span class="v">${fmt(t.damaged)}</span><span class="s"><span class="pill ${pct(t.damaged,t.made)>=5?"hi":"lo"}">${pctTxt(pct(t.damaged,t.made))} of counted</span></span></div>`;
-  renderOrderForm();
+  renderOrderForm(); renderCopy(d,live);
   const F=S.oFilter||"all", counts={all:os.length,open:live.filter(o=>o.status!=="inspected").length,inspected:cnt("inspected")};
   $("oFilter").innerHTML=os.length?[["all","All"],["open","Not finished"],["inspected","Inspected"]].map(([k,l])=>`<button type="button" class="chip" data-f="${k}" aria-pressed="${F===k}">${l} ${counts[k]}</button>`).join(""):"";
   const shown=os.filter(o=>F==="all"||(F==="open"?o.status!=="inspected"&&o.status!=="cancelled":o.status==="inspected"));
@@ -843,6 +844,20 @@ function renderDay(){
   $("dSheet").innerHTML=!pids.length?`<div class="empty">Nothing yet.</div>`:`<table><thead><tr><th>Bread</th><th>Batches</th><th>Expected</th><th>Counted</th><th>Passed (released)</th><th>Damaged</th><th>Damage %</th></tr></thead><tbody>${
     pids.map(id=>{ const r=rowOf(d,id), dp=pct(r.damaged,r.made); return `<tr><td>${esc(pname(id))}</td><td>${fmt(r.batches)}</td><td>${r.expected?fmt(r.expected):"–"}</td><td>${fmt(r.made)}${diffTxt(r)}</td><td>${fmt(r.released)}</td><td>${fmt(r.damaged)}</td><td>${r.made?`<span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)}</span>`:"–"}</td></tr>`; }).join("")
   }</tbody></table>${legacy?`<p class="note" style="padding:8px 12px">This day was logged before production orders.</p>`:""}`;
+}
+// "Same as <day>": the latest earlier day (up to 14 days back) that has orders, offered while this day has none.
+function copySource(d){ for(let i=1;i<=14;i++){ const p=addDays(d,-i), os=dayOrders(p).filter(o=>o.status!=="cancelled"&&o.pid); if(os.length) return {date:p,orders:os}; } return null; }
+function renderCopy(d,live){
+  const el=$("oCopy"), src=!live.length&&copySource(d);
+  el.hidden=!src; if(!src) return;
+  el.innerHTML=`<button class="btn" type="button" id="oCopyBtn">Same as ${esc(nice(src.date))}</button><span class="note">Adds ${src.orders.length} order${src.orders.length===1?"":"s"}: ${esc(src.orders.map(o=>pname(o.pid)+" ×"+fmt(n(o.batches))).join(", "))}. You can change or cancel any of them after.</span>`;
+}
+function copyOrders(){
+  const d=S.dDate, src=copySource(d); if(!src||dayOrders(d).some(o=>o.status!=="cancelled")) return;
+  S.days[d]=S.days[d]||{date:d,rows:{},orders:{}}; S.days[d].orders=Object.assign({},S.days[d].orders||{});
+  let no=dayOrders(d).reduce((m,o)=>Math.max(m,o.no||0),0); const now=Date.now();
+  src.orders.forEach(o=>{ no++; const x={no,pid:o.pid,batches:n(o.batches),baker:o.baker||"",note:o.note||"",status:"ordered",at:{ordered:now}}; S.days[d].orders[newId("o")]=x; });
+  queueDay(d); renderDay(); toast(src.orders.length+" order"+(src.orders.length===1?"":"s")+" added, same as "+nice(src.date));
 }
 function setOrder(date,id,patch){
   S.days[date]=S.days[date]||{date,rows:{},orders:{}}; S.days[date].orders=Object.assign({},S.days[date].orders||{});
@@ -1034,6 +1049,7 @@ $("dPrev").onclick=()=>{ S.dDate=addDays(S.dDate,-1); renderDay(); };
 $("dNext").onclick=()=>{ S.dDate=addDays(S.dDate,1); renderDay(); };
 $("dToday").onclick=()=>{ S.dDate=today(); renderDay(); };
 $("oList").addEventListener("click",onOrderAct);
+$("oCopy").addEventListener("click",e=>{ if(e.target.closest("#oCopyBtn")) copyOrders(); });
 $("oFilter").addEventListener("click",e=>{ const c=e.target.closest("[data-f]"); if(!c) return; S.oFilter=c.dataset.f; renderDay(); });
 $("oBread").addEventListener("change",updExp); $("oBatches").addEventListener("input",updExp);
 $("oNew").addEventListener("submit",e=>{
