@@ -212,6 +212,9 @@ td a{color:inherit}
 .avail.ok{color:var(--net)} .avail.bad{color:var(--dmg)}
 .warnbox{padding:9px 12px;border-radius:8px;background:var(--dmg-soft);color:var(--dmg);font-weight:600;font-size:.88rem}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.findbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.findbar input{flex:1 1 200px;min-width:0}
+.btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 h3{font-family:var(--display);font-weight:700;font-size:1.05rem;margin:0}
 .btn.sm{padding:5px 10px;font-size:.84rem}
 .sub{display:block;font-size:.74rem;color:var(--muted);font-weight:400}
@@ -353,6 +356,7 @@ tr.void td a{text-decoration:line-through}
     </div>
     <h2>Items</h2>
     <p class="note">What you send to branches. Price is optional; when set, the report shows the peso value delivered, pulled out and damaged.</p>
+    <div id="iFind"></div>
     <div class="sheet">
       <div id="iList"></div>
       <form class="add" id="iAdd">
@@ -761,6 +765,17 @@ function rowsFor(dates,bFilter){ // flat list of {date,bid,iid,sent,pulled,damag
 function group(rows,key){ const g={}; rows.forEach(r=>{ (g[r[key]]=g[r[key]]||[]).push(r); }); return g; }
 function orderIds(ids,list){ const known=list.map(x=>x.id).filter(id=>ids.includes(id)); return known.concat(ids.filter(id=>!known.includes(id))); }
 const anyPrice=()=>true;
+/* ---------- search + A to Z (screen lists only; printouts keep the order set in Branches & items) ---------- */
+try{ S.az=localStorage.getItem(LS+".az")==="1"; }catch(e){}
+S.q="";
+const byName=(a,b)=>String(a).localeCompare(String(b),undefined,{sensitivity:"base",numeric:true});
+function azIds(ids,nameOf){ return S.az?ids.slice().sort((a,b)=>byName(nameOf(a),nameOf(b))):ids; }
+const hits=name=>{ const q=S.q.trim().toLowerCase(); return !q||String(name).toLowerCase().includes(q); };
+const findAttr=name=>` data-name="${esc(name)}"${hits(name)?"":" hidden"}`;
+function findBar(id){ return `<div class="findbar"><input type="search" id="${id}" data-find value="${esc(S.q)}" placeholder="🔍 Search bread" aria-label="Search bread" autocomplete="off"><button class="btn sm" type="button" data-az aria-pressed="${!!S.az}" title="Sort by name, A to Z">A–Z</button></div>`; }
+function applyFind(){ document.querySelectorAll("[data-name]").forEach(r=>r.hidden=!hits(r.dataset.name)); }
+function focusedFind(){ const a=document.activeElement; return a&&a.matches&&a.matches("[data-find]")?a.id:null; }
+function refocus(id){ const x=id&&$(id); if(x&&document.activeElement!==x){ x.focus(); try{ x.setSelectionRange(x.value.length,x.value.length); }catch(e){} } }
 
 /* ---------- storage ---------- */
 function saveLocal(){ try{ localStorage.setItem(LS,JSON.stringify({main:S.main,items:S.items,branches:S.branches,days:S.days})); }catch(e){} }
@@ -845,17 +860,18 @@ function renderReadyIfIdle(){ if(S.tab!=="day") return; const ae=document.active
 function renderReady(){
   const d=S.dDate, el=$("dReady"); if(!el) return;
   if(!S.items.length){ el.innerHTML=""; return; }
-  const m=readyMap(d), ids=orderIds(Object.keys(m),S.items), lots=((S.days[d]||{}).ready||[]).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+  const fid=focusedFind(), m=readyMap(d), rname=iid=>iid.startsWith("x:")?m[iid].name:iname(iid), ids=azIds(orderIds(Object.keys(m),S.items),rname), lots=((S.days[d]||{}).ready||[]).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
   const T=ids.reduce((t,iid)=>{ t.ready+=m[iid].ready; t.sent+=m[iid].sent; return t; },{ready:0,sent:0});
   el.innerHTML=`<div class="card ready">
     <div class="bar" style="justify-content:space-between"><h2>Available for delivery</h2><span class="bar"><span class="sync" id="rSync">${syncTxt()}</span><button class="btn sm" id="syncNow">Update now</button></span></div>
-    ${ids.length?`<div class="sheet"><table><thead><tr><th>Bread</th><th>Passed inspection</th><th>Delivered</th><th>Available</th></tr></thead><tbody>${
-      ids.map(iid=>{ const x=m[iid]; return `<tr><td>${esc(iid.startsWith("x:")?x.name:iname(iid))}${iid.startsWith("x:")?`<span class="sub">Not in your item list here. Add it in Branches &amp; items with the same name.</span>`:""}</td><td>${fmt(x.ready)}</td><td>${fmt(x.sent)}</td><td><b>${fmt(Math.max(0,x.avail))}</b> ${availPill(x.avail,x.ready)}</td></tr>`; }).join("")
+    ${ids.length?`${findBar("qReady")}<div class="sheet"><table><thead><tr><th>Bread</th><th>Passed inspection</th><th>Delivered</th><th>Available</th></tr></thead><tbody>${
+      ids.map(iid=>{ const x=m[iid]; return `<tr${findAttr(rname(iid))}><td>${esc(rname(iid))}${iid.startsWith("x:")?`<span class="sub">Not in your item list here. Add it in Branches &amp; items with the same name.</span>`:""}</td><td>${fmt(x.ready)}</td><td>${fmt(x.sent)}</td><td><b>${fmt(Math.max(0,x.avail))}</b> ${availPill(x.avail,x.ready)}</td></tr>`; }).join("")
     }</tbody><tfoot><tr><td>Total</td><td>${fmt(T.ready)}</td><td>${fmt(T.sent)}</td><td>${fmt(Math.max(0,T.ready-T.sent))}</td></tr></tfoot></table></div>`
       :`<p class="note">No bread has passed inspection in Bakery Production for this day yet.</p>`}
     <p class="note">Comes from Bakery Production: pieces that pass quality inspection there show here, and every delivery receipt deducts from them. It updates by itself within a minute of production saving an inspection on the Bakery Production website.</p>
     ${""&&lots.length?`<div class="lots">${lots.map(r=>`<div class="lot"><span><b>${timeTxt(r.time)}</b>${r.by?" · "+esc(r.by):""} · ${orderIds(Object.keys(r.items||{}),S.items).filter(iid=>n(r.items[iid])).map(iid=>esc(iname(iid))+" "+fmt(n(r.items[iid]))).join(", ")}${r.note?` <span class="sub">${esc(r.note)}</span>`:""}</span><span class="bar"><button class="btn sm" data-redit="${r.id}">Edit</button><button class="btn sm danger" data-rdel="${r.id}">${pendingConfirm==="r:"+r.id?"Tap again":"Remove"}</button></span></div>`).join("")}</div>`:""}
   </div>`;
+  refocus(fid);
 }
 const SYNC_TRIGGER="trig_01LQ5qTzEiJE5AVNq2Fb8BAV";
 function syncTxt(){ const x=S.sync; if(S.syncing) return "Updating… (a minute or two)"; if(!x||!x.at) return "Not updated yet";
@@ -879,7 +895,7 @@ function readyFormHTML(){
     </div>
     <datalist id="byList2">${issuers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
     <div class="sheet"><table><thead><tr><th>Bread</th><th>Pieces ready</th></tr></thead><tbody>${
-      S.items.map(i=>`<tr><td>${esc(i.name)}</td><td><input id="r-${i.id}" type="number" min="0" step="1" inputmode="numeric" data-ri="${i.id}" value="${f.items[i.id]||""}" aria-label="${esc(i.name)} pieces ready"></td></tr>`).join("")
+      azIds(S.items,i=>i.name).map(i=>`<tr${findAttr(i.name)}><td>${esc(i.name)}</td><td><input id="r-${i.id}" type="number" min="0" step="1" inputmode="numeric" data-ri="${i.id}" value="${f.items[i.id]||""}" aria-label="${esc(i.name)} pieces ready"></td></tr>`).join("")
     }</tbody></table></div>
     <div class="trip"><label style="grid-column:1/-1">Notes<input id="rNote" value="${esc(f.note)}" placeholder="e.g. second batch, for afternoon trips"></label></div>
     <div class="bar"><button class="btn primary" type="submit">${f.id?"Save changes":"Post as available"}</button><button class="btn" type="button" id="rCancel">Cancel</button></div>
@@ -914,7 +930,7 @@ function renderDay(){
   const act=activeBranches();
   if(!S.dBranch||!act.some(b=>b.id===S.dBranch)) S.dBranch=act[0]?act[0].id:"";
   $("dBranches").innerHTML=act.map(b=>{ const k=tripsOf(d,b.id).filter(t=>!t.void).length; return `<button class="chip" data-branch="${b.id}" aria-pressed="${b.id===S.dBranch}">${esc(b.name)}${k?` <span class="cnt">${k}</span>`:""}</button>`; }).join("");
-  const body=$("dBody");
+  const body=$("dBody"), fid=focusedFind();
   if(!act.length||!S.items.length){
     body.innerHTML=`<div class="sheet"><div class="empty">${!act.length?"No branches yet.":"No items yet."} Open <b>Branches &amp; items</b> to add the branches you deliver to and the breads you send. Then come back here to log each delivery.</div></div>`;
     renderDayAll(); return;
@@ -938,11 +954,12 @@ function renderDay(){
     ${live_.length?dayItemsHTML(d,bid,live_):""}
     ${live_.length?`<div class="printbar">${canDirect()?`<button class="btn primary" id="prSlipOne">🖨 Print day summary</button><button class="btn primary" id="prRecsOne">🖨 Print all ${live_.length} receipt${live_.length===1?"":"s"}</button>`:""}<button class="btn" id="slipOne">Save day summary PDF</button><button class="btn" id="recsOne">Save all ${live_.length} receipt${live_.length===1?"":"s"} as PDF</button></div>`:""}`;
   tiles($("dTiles"),t,live_.length+" trip"+(live_.length===1?"":"s")+" today");
+  refocus(fid);
   renderDayAll();
 }
 // Per-bread summary with one column per trip, so the day reads at a glance.
 function dayItemsHTML(d,bid,trips){
-  const ids=orderIds([...new Set(trips.flatMap(x=>Object.keys(x.items||{}).filter(iid=>{ const q=qtyOf(x.items[iid]); return q.sent||q.pulled||q.damaged; })))],S.items);
+  const ids=azIds(orderIds([...new Set(trips.flatMap(x=>Object.keys(x.items||{}).filter(iid=>{ const q=qtyOf(x.items[iid]); return q.sent||q.pulled||q.damaged; })))],S.items),iname);
   const T=sum(ids.map(iid=>cell(d,bid,iid)));
   return `<h2>Day summary by bread</h2><div class="sheet"><table><thead><tr><th>Bread</th>${trips.map((x,i)=>`<th>Trip ${i+1}<span class="sub">${timeTxt(x.time)}</span></th>`).join("")}<th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Net</th><th>Amount</th><th>Net amount</th></tr></thead><tbody>${
     ids.map(iid=>{ const c=cell(d,bid,iid), net=c.sent-c.pulled-c.damaged;
@@ -951,7 +968,7 @@ function dayItemsHTML(d,bid,trips){
 }
 function formHTML(){
   const f=S.form, old=f.id?tripsOf(f.date,f.bid).find(x=>x.id===f.id):null;
-  const ids=S.items.map(i=>i.id).concat(Object.keys(f.items).filter(k=>!S.items.some(i=>i.id===k)));
+  const ids=azIds(S.items.map(i=>i.id).concat(Object.keys(f.items).filter(k=>!S.items.some(i=>i.id===k))),iname);
   const ft=formTotals();
   return `<form class="card" id="tripForm" autocomplete="off">
     <div class="bar" style="justify-content:space-between"><h3>${old?"Edit receipt "+recNo(old.no):"New delivery to "+esc(bname(f.bid))}</h3><span class="pill lo">${old?"":"Will be "}${recNo(old?old.no:nextNo())}</span></div>
@@ -962,11 +979,12 @@ function formHTML(){
     </div>
     <datalist id="byList">${issuers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
     <datalist id="driverList">${drivers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
+    ${findBar("qForm")}
     <div class="sheet"><table><thead><tr><th>Bread</th><th>Price ₱</th><th>Available</th><th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Amount</th></tr></thead><tbody>${
       ids.map(iid=>{ const it=f.items[iid]||{}, p=priceOf(it,iid);
         const inp=k=>`<input id="f-${iid}-${k}" type="number" min="0" step="1" inputmode="numeric" data-fi="${iid}" data-f="${k}" value="${it[k]===undefined?"":it[k]}" aria-label="${esc(iname(iid))} ${k}">`;
         const av=formAvail(iid), left=av===null?null:av-n(it.sent);
-        return `<tr><td>${esc(iname(iid))}</td><td><input id="f-${iid}-price" type="number" min="0" step="0.01" inputmode="decimal" data-fi="${iid}" data-f="price" value="${p||""}" placeholder="₱" aria-label="${esc(iname(iid))} price"></td><td id="fv-${iid}">${availCell(left)}</td><td>${inp("sent")}</td><td>${inp("pulled")}</td><td>${inp("damaged")}</td><td id="fa-${iid}">${peso(n(it.sent)*p)}</td></tr>`; }).join("")
+        return `<tr${findAttr(iname(iid))}><td>${esc(iname(iid))}</td><td><input id="f-${iid}-price" type="number" min="0" step="0.01" inputmode="decimal" data-fi="${iid}" data-f="price" value="${p||""}" placeholder="₱" aria-label="${esc(iname(iid))} price"></td><td id="fv-${iid}">${availCell(left)}</td><td>${inp("sent")}</td><td>${inp("pulled")}</td><td>${inp("damaged")}</td><td id="fa-${iid}">${peso(n(it.sent)*p)}</td></tr>`; }).join("")
     }</tbody><tfoot><tr><td>Total</td><td></td><td></td><td id="ft-sent">${fmt(ft.sent)}</td><td id="ft-pulled">${fmt(ft.pulled)}</td><td id="ft-damaged">${fmt(ft.damaged)}</td><td id="ft-amt">${peso(ft.vSent)}</td></tr></tfoot></table></div>
     <div id="fWarn">${overTxt()}</div>
     <p class="note">Available = bread that passed inspection in Bakery Production today, minus what other receipts already took. Delivered = bread the driver takes to the branch on this trip. Pulled out and Damaged = bread the driver brings back from the branch on this trip (leave blank if none).</p>
@@ -1315,14 +1333,17 @@ function renderSetup(){
       <button class="btn up" data-bmove="-1" data-id="${b.id}" ${i===0?"disabled":""} aria-label="Move up">↑</button>
       <button class="btn up" data-bmove="1" data-id="${b.id}" ${i===act.length-1?"disabled":""} aria-label="Move down">↓</button>
       <button class="btn danger" data-bdel="${b.id}">${pendingConfirm===b.id?"Tap again":"Remove"}</button></div>`).join("");
+  const fid=focusedFind(), shown=azIds(S.items,x=>x.name);
+  $("iFind").innerHTML=S.items.length?findBar("qItems")+(S.az?`<p class="note">Sorted A to Z. Turn off A–Z to move items with ↑ ↓; that order is used on receipts.</p>`:""):"";
   $("iList").innerHTML=!S.items.length?`<div class="empty">No items yet. Add the first one below.</div>`:
     `<div class="list-row head"><span>Item</span><span>Price ₱</span><span class="up"></span><span class="up"></span><span></span></div>`+
-    S.items.map((x,i)=>`<div class="list-row">
+    shown.map((x,i)=>`<div class="list-row"${findAttr(x.name)}>
       <input id="in-${x.id}" value="${esc(x.name)}" data-edit="name" data-id="${x.id}" aria-label="Item name">
       <input id="ip-${x.id}" type="number" step="0.01" min="0" inputmode="decimal" value="${x.price||""}" placeholder="₱" data-edit="price" data-id="${x.id}" aria-label="${esc(x.name)} price">
-      <button class="btn up" data-move="-1" data-id="${x.id}" ${i===0?"disabled":""} aria-label="Move up">↑</button>
-      <button class="btn up" data-move="1" data-id="${x.id}" ${i===S.items.length-1?"disabled":""} aria-label="Move down">↓</button>
+      <button class="btn up" data-move="-1" data-id="${x.id}" ${i===0||S.az?"disabled":""} aria-label="Move up">↑</button>
+      <button class="btn up" data-move="1" data-id="${x.id}" ${i===S.items.length-1||S.az?"disabled":""} aria-label="Move down">↓</button>
       <button class="btn danger" data-del="${x.id}">${pendingConfirm===x.id?"Tap again":"Remove"}</button></div>`).join("");
+  refocus(fid);
 }
 
 function render(){
@@ -1401,6 +1422,12 @@ $("iList").addEventListener("click",e=>{ const b=e.target.closest("button"); if(
   if(b.dataset.del){ const id=b.dataset.del; if(pendingConfirm!==id){ armConfirm(id); return; }
     const x=S.items.find(i=>i.id===id); S.items=S.items.filter(i=>i.id!==id); pendingConfirm=null; renderSetup(); writeSetup(); toast("Removed "+(x?x.name:"item")+". Past deliveries stay in reports."); }
 });
+
+document.addEventListener("input",e=>{ const el=e.target; if(!el.matches||!el.matches("[data-find]")) return;
+  S.q=el.value; document.querySelectorAll("[data-find]").forEach(x=>{ if(x!==el) x.value=S.q; }); applyFind(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.target.matches&&e.target.matches("[data-find]")){ e.preventDefault(); e.target.blur(); } });
+document.addEventListener("click",e=>{ const b=e.target.closest&&e.target.closest("[data-az]"); if(!b) return; e.preventDefault();
+  S.az=!S.az; try{ localStorage.setItem(LS+".az",S.az?"1":"0"); }catch(x){} render(); });
 
 /* ---------- boot ---------- */
 loadLocal();
