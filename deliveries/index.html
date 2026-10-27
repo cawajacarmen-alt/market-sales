@@ -217,6 +217,20 @@ td a{color:inherit}
 .btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 h3{font-family:var(--display);font-weight:700;font-size:1.05rem;margin:0}
 .btn.sm{padding:5px 10px;font-size:.84rem}
+.addbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--accent-soft);border-radius:10px;padding:10px}
+.addbar input,.addbar select{min-width:0}
+.addbar #aItem{flex:2 1 180px}.addbar #aQty{flex:0 1 90px;width:90px}.addbar #aK{flex:0 1 auto}
+.lines{display:flex;flex-wrap:wrap;gap:6px}
+.lines span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:3px 4px 3px 10px;font-size:.84rem}
+.lines button{border:0;background:transparent;color:var(--dmg);font:700 1rem var(--body);cursor:pointer;padding:0 6px;line-height:1}
+.pv{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto;z-index:4}
+.pv .card{width:100%;max-width:640px;background:var(--bg);margin:auto 0}
+.pv table{width:100%}
+.pv th,.pv td{padding-inline:8px}
+.pv .rm{padding:4px 9px;font-weight:700}
+@media (max-width:480px){.pv{padding:8px}.pv .card{padding:14px}}
+.pv .sub{display:block;font-size:.75rem;color:var(--muted)}
+.pv .rm{color:var(--dmg)}
 .sub{display:block;font-size:.74rem;color:var(--muted);font-weight:400}
 .cnt{display:inline-block;min-width:20px;padding:0 6px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-size:.75rem;line-height:1.5}
 .chip[aria-pressed="true"] .cnt{background:var(--accent-ink);color:var(--accent)}
@@ -979,6 +993,9 @@ function formHTML(){
     </div>
     <datalist id="byList">${issuers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
     <datalist id="driverList">${drivers().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
+    <datalist id="itemNames">${azIds(S.items.map(i=>i.id),iname).map(iid=>`<option value="${esc(iname(iid))}">`).join("")}</datalist>
+    <div class="addbar"><input id="aItem" list="itemNames" placeholder="Bread name" aria-label="Bread to add" autocomplete="off"><input id="aQty" type="number" min="1" step="1" inputmode="numeric" placeholder="Qty" aria-label="Quantity to add"><select id="aK" aria-label="Add to"><option value="sent">Delivered</option><option value="pulled">Pulled out</option><option value="damaged">Damaged</option></select><button class="btn primary" type="button" id="aAdd">+ Add</button></div>
+    <div class="lines" id="fLines">${linesHTML()}</div>
     ${findBar("qForm")}
     <div class="sheet"><table><thead><tr><th>Bread</th><th>Price ₱</th><th>Available</th><th>Delivered</th><th>Pulled out</th><th>Damaged</th><th>Amount</th></tr></thead><tbody>${
       ids.map(iid=>{ const it=f.items[iid]||{}, p=priceOf(it,iid);
@@ -989,7 +1006,7 @@ function formHTML(){
     <div id="fWarn">${overTxt()}</div>
     <p class="note">Available = bread that passed inspection in Bakery Production today, minus what other receipts already took. Delivered = bread the driver takes to the branch on this trip. Pulled out and Damaged = bread the driver brings back from the branch on this trip (leave blank if none).</p>
     <div class="trip"><label style="grid-column:1/-1">Notes<input id="fNote" value="${esc(f.note)}" placeholder="e.g. 2 trays short, stale bread pulled out"></label></div>
-    <div class="bar"><button class="btn primary" type="submit">${old?"Save changes":"Save and issue receipt"}</button><button class="btn" type="button" id="fCancel">Cancel</button>${old?`<button class="btn danger" type="button" id="fVoid">${pendingConfirm==="v:"+old.id?"Tap again to void":"Void this receipt"}</button>`:""}</div>
+    <div class="bar"><button class="btn primary" type="submit">${old?"Review and save changes":"Review receipt"}</button><button class="btn" type="button" id="fCancel">Cancel</button>${old?`<button class="btn danger" type="button" id="fVoid">${pendingConfirm==="v:"+old.id?"Tap again to void":"Void this receipt"}</button>`:""}</div>
   </form>`;
 }
 // Available for this trip = ready − delivered on the day's other receipts (an edited receipt's own pieces count as available).
@@ -1006,11 +1023,64 @@ function onFormInput(e){
   const it=f.items[iid]=Object.assign({},f.items[iid]);
   if(k==="price"){ const v=el.value===""?0:Math.max(0,Math.round((Number(el.value)||0)*100)/100); it.price=v;
     const x=S.items.find(i=>i.id===iid); if(x&&!f.id){ x.price=v; clearTimeout(onFormInput.p); onFormInput.p=setTimeout(writeSetup,700); } }
-  else if(el.value==="") delete it[k]; else it[k]=Math.max(0,Math.floor(Number(el.value)||0));
+  else { if(el.value==="") delete it[k]; else it[k]=Math.max(0,Math.floor(Number(el.value)||0)); dropLines(iid,k); }
   $("fa-"+iid).textContent=peso(n(it.sent)*priceOf(it,iid));
   const av=formAvail(iid); $("fv-"+iid).innerHTML=availCell(av===null?null:av-n(it.sent)); $("fWarn").innerHTML=overTxt();
   const ft=formTotals(); ["sent","pulled","damaged"].forEach(q=>$("ft-"+q).textContent=fmt(ft[q])); $("ft-amt").textContent=peso(ft.vSent);
 }
+// Quick add, like a POS: the same bread can be added several times and the lines add up on the receipt.
+const KTXT={sent:"delivered",pulled:"pulled out",damaged:"damaged"};
+function linesOf(){ const f=S.form; return f?(f.lines||(f.lines=[])):[]; }
+function linesHTML(){ return linesOf().map((l,i)=>`<span>${esc(iname(l.iid))} +${fmt(l.q)}${l.k==="sent"?"":" "+KTXT[l.k]}<button type="button" data-unline="${i}" aria-label="Remove this line">×</button></span>`).join(""); }
+function dropLines(iid,k){ const f=S.form; if(f&&f.lines){ f.lines=f.lines.filter(l=>!(l.iid===iid&&l.k===k)); const el=$("fLines"); if(el) el.innerHTML=linesHTML(); } }
+function findItem(txt){ const q=String(txt||"").trim().toLowerCase(); if(!q) return null;
+  const ex=S.items.find(i=>i.name.toLowerCase()===q); if(ex) return ex.id;
+  const st=S.items.filter(i=>i.name.toLowerCase().startsWith(q)); if(st.length===1) return st[0].id;
+  const inc=S.items.filter(i=>i.name.toLowerCase().includes(q)); return inc.length===1?inc[0].id:null; }
+function refreshRow(iid){ const f=S.form, it=f.items[iid]||{};
+  ["sent","pulled","damaged"].forEach(k=>{ const el=$("f-"+iid+"-"+k); if(el) el.value=it[k]===undefined?"":it[k]; });
+  if($("fa-"+iid)) $("fa-"+iid).textContent=peso(n(it.sent)*priceOf(it,iid));
+  const av=formAvail(iid); if($("fv-"+iid)) $("fv-"+iid).innerHTML=availCell(av===null?null:av-n(it.sent)); $("fWarn").innerHTML=overTxt();
+  const ft=formTotals(); ["sent","pulled","damaged"].forEach(q=>$("ft-"+q).textContent=fmt(ft[q])); $("ft-amt").textContent=peso(ft.vSent);
+  $("fLines").innerHTML=linesHTML(); }
+function addLine(){ const f=S.form; if(!f) return;
+  const iid=findItem($("aItem").value), q=Math.floor(Number($("aQty").value)||0), k=$("aK").value;
+  if(!iid){ toast($("aItem").value.trim()?"No bread with that name. Pick one from the list.":"Type or pick a bread first."); $("aItem").focus(); return; }
+  if(q<=0){ toast("Type how many."); $("aQty").focus(); return; }
+  const it=f.items[iid]=Object.assign({},f.items[iid]); it[k]=n(it[k])+q; linesOf().push({iid,k,q});
+  refreshRow(iid); $("aItem").value=""; $("aQty").value=""; $("aItem").focus();
+  toast(iname(iid)+": "+fmt(it[k])+" "+KTXT[k]+" in all"); }
+function unLine(i){ const f=S.form, l=linesOf()[i]; if(!l) return; const it=f.items[l.iid]=Object.assign({},f.items[l.iid]);
+  const v=n(it[l.k])-l.q; if(v>0) it[l.k]=v; else delete it[l.k]; f.lines.splice(i,1); refreshRow(l.iid); }
+// Receipt preview: check the receipt before it is saved, and take out anything that should not be on it.
+function previewHTML(){
+  const f=S.form, old=f.id?tripsOf(f.date,f.bid).find(x=>x.id===f.id):null;
+  const ids=azIds(Object.keys(f.items).filter(iid=>{ const q=qtyOf(f.items[iid]); return q.sent||q.pulled||q.damaged; }),iname), ft=formTotals();
+  const parts=(iid,k)=>{ const ls=linesOf().filter(l=>l.iid===iid&&l.k===k); return ls.length>1?`<span class="sub">${ls.map(l=>fmt(l.q)).join(" + ")}</span>`:""; };
+  const miss=azIds(S.items.map(i=>i.id),iname).filter(iid=>{ const av=formAvail(iid); return av!==null&&av>0&&!qtyOf(f.items[iid]).sent; });
+  return `<div class="card" role="dialog" aria-modal="true" aria-labelledby="pvTitle">
+    <div class="bar" style="justify-content:space-between"><h3 id="pvTitle">Check delivery receipt</h3><span class="pill lo">${recNo(old?old.no:nextNo())}</span></div>
+    <p class="note">To ${esc(bname(f.bid))} · ${esc(f.date)}${f.time?" · left "+esc(timeTxt(f.time)):""}${f.driver?" · driver "+esc(f.driver):""}${f.by?" · issued by "+esc(f.by):""}</p>
+    ${ids.length?`<div class="sheet"><table><thead><tr><th>Bread</th><th>Delivered</th><th>Amount</th><th></th></tr></thead><tbody>${
+      ids.map(iid=>{ const it=f.items[iid], q=qtyOf(it), p=priceOf(it,iid);
+        const back=[q.pulled?fmt(q.pulled)+" pulled out":"",q.damaged?fmt(q.damaged)+" damaged":""].filter(Boolean).join(", ");
+        return `<tr><td>${esc(iname(iid))}<span class="sub">${peso(p)} each</span></td><td><b>${fmt(q.sent)}</b>${parts(iid,"sent")}${back?`<span class="sub">${back}</span>`:""}</td><td>${peso(q.sent*p)}</td><td><button class="btn sm rm" type="button" data-prm="${iid}" aria-label="Remove ${esc(iname(iid))}" title="Remove">✕</button></td></tr>`; }).join("")
+    }</tbody><tfoot><tr><td>Total</td><td>${fmt(ft.sent)}${ft.pulled||ft.damaged?`<span class="sub">${[ft.pulled?fmt(ft.pulled)+" pulled out":"",ft.damaged?fmt(ft.damaged)+" damaged":""].filter(Boolean).join(", ")}</span>`:""}</td><td>${peso(ft.vSent)}</td><td></td></tr></tfoot></table></div>`:`<div class="warnbox">Nothing is on this receipt yet.</div>`}
+    ${miss.length?`<div class="warnbox" style="background:var(--pull-soft);color:var(--pull)">Ready but not on this receipt: ${miss.map(iid=>esc(iname(iid))+" ("+fmt(formAvail(iid))+")").join(", ")}. Go back if any of these should be delivered.</div>`:""}
+    ${overTxt()}
+    <div class="bar"><button class="btn primary" type="button" id="pvSave"${ids.length?"":" disabled"}>${old?"Save changes":"Save and issue receipt"}</button><button class="btn" type="button" id="pvBack">Back to edit</button></div>
+  </div>`;
+}
+function openPreview(){ const f=S.form; if(!f) return;
+  if(!Object.keys(f.items).some(iid=>{ const q=qtyOf(f.items[iid]); return q.sent||q.pulled||q.damaged; })){ toast("Type how many of each bread were delivered."); return; }
+  let el=$("pvSheet"); if(!el){ el=document.createElement("div"); el.id="pvSheet"; el.className="pv"; document.body.appendChild(el);
+    el.addEventListener("click",e=>{ if(e.target===el) return closePreview(); const b=e.target.closest("button"); if(!b) return;
+      if(b.id==="pvBack") return closePreview();
+      if(b.id==="pvSave"){ closePreview(); return saveForm(); }
+      if(b.dataset.prm){ const iid=b.dataset.prm; delete S.form.items[iid]; S.form.lines=linesOf().filter(l=>l.iid!==iid); renderDay(); toast(iname(iid)+" taken off"); return openPreview(); } });
+    el.addEventListener("keydown",e=>{ if(e.key==="Escape") closePreview(); }); }
+  el.innerHTML=previewHTML(); const s=$("pvSave"); (s&&!s.disabled?s:$("pvBack")).focus(); }
+function closePreview(){ const el=$("pvSheet"); if(el) el.remove(); }
 function openForm(t){
   pendingConfirm=null;
   const L=lastTrip();
@@ -1361,12 +1431,15 @@ $("dNext").onclick=()=>{ S.dDate=addDays(S.dDate,1); renderDay(); };
 $("dToday").onclick=()=>{ S.dDate=today(); renderDay(); };
 $("dBranches").addEventListener("click",e=>{ const b=e.target.closest("[data-branch]"); if(!b) return; S.dBranch=b.dataset.branch; S.form=null; S.showRec=null; renderDay(); });
 $("dBody").addEventListener("input",onFormInput);
-$("dBody").addEventListener("submit",e=>{ e.preventDefault(); if(e.target.id==="tripForm") saveForm(); });
+$("dBody").addEventListener("submit",e=>{ e.preventDefault(); if(e.target.id==="tripForm") openPreview(); });
+$("dBody").addEventListener("keydown",e=>{ if(e.key==="Enter"&&(e.target.id==="aItem"||e.target.id==="aQty")){ e.preventDefault(); if(e.target.id==="aItem"&&!$("aQty").value) $("aQty").focus(); else addLine(); } });
 $("dBody").addEventListener("click",e=>{
   const b=e.target.closest("button,a"); if(!b) return;
   const day=S.days[S.dDate]||{}, find=id=>(day.drops||[]).find(x=>x.id===id);
   if(b.id==="newTrip") return openForm(null);
   if(b.id==="fCancel"){ S.form=null; pendingConfirm=null; return renderDay(); }
+  if(b.id==="aAdd") return addLine();
+  if(b.dataset.unline!==undefined) return unLine(Number(b.dataset.unline));
   if(b.id==="fVoid"){ const id=S.form.id; if(pendingConfirm!=="v:"+id){ pendingConfirm="v:"+id; b.textContent="Tap again to void"; setTimeout(()=>{ if(pendingConfirm==="v:"+id){ pendingConfirm=null; if($("fVoid")) $("fVoid").textContent="Void this receipt"; } },4000); return; } return voidTrip(id); }
   if(b.dataset.rec){ e.preventDefault(); S.showRec=b.dataset.rec; S.form=null; renderDay(); const el=$("recCard"); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); return; }
   if(b.id==="recClose"){ S.showRec=null; return renderDay(); }
