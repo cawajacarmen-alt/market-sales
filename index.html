@@ -87,7 +87,8 @@
   var go = function () { if (locked) screen(); else bar(); };
   if (document.body) go(); else document.addEventListener('DOMContentLoaded', go);
 })();
-</script><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+</script><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}.rlock{display:inline-block;min-width:64px;padding:8px 4px;text-align:right;font-weight:600;color:var(--sold,#2e6b3a)}
+</style></head><body>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&display=swap">
 <script>/*! xlsx.mini 0.18.5 (c) SheetJS LLC, Apache-2.0 */
@@ -469,7 +470,7 @@ function renderDay(){
     ${ids.some(iid=>(raw[iid]||{}).dlv)?`<h2>Delivery check</h2>
     <div class="sheet"><table class="chk"><thead><tr><th>Bread</th><th>Receipt</th><th>Delivered</th><th>Received</th><th>Lacking</th><th class="l">Note</th></tr></thead><tbody>${
       ids.filter(iid=>(raw[iid]||{}).dlv).map(iid=>{ const r=raw[iid];
-        return `<tr><td>${esc(iname(iid))}</td><td class="mut">${esc(r.dlv.dr||"–")}</td><td>${fmt(n(r.dlv.in))}</td><td><input type="number" min="0" step="1" inputmode="numeric" data-rcv="${iid}" value="${r.rcv===undefined?"":r.rcv}" placeholder="count" aria-label="${esc(iname(iid))} received"></td><td id="lack-${iid}">${lackCell(r)}</td><td class="l"><input class="nt" data-rnote="${iid}" value="${esc(r.rnote||"")}" placeholder="e.g. 5 pcs missing, 2 squashed" aria-label="${esc(iname(iid))} note"></td></tr>`; }).join("")
+        return `<tr><td>${esc(iname(iid))}</td><td class="mut">${esc(r.dlv.dr||"–")}</td><td>${fmt(n(r.dlv.in))}</td><td>${rcvLocked(r)?rcvLockHTML(r):`<input type="number" min="0" step="1" inputmode="numeric" data-rcv="${iid}" value="${r.rcv===undefined?"":r.rcv}" placeholder="count" aria-label="${esc(iname(iid))} received">`}</td><td id="lack-${iid}">${lackCell(r)}</td><td class="l"><input class="nt" data-rnote="${iid}" value="${esc(r.rnote||"")}" placeholder="e.g. 5 pcs missing, 2 squashed" aria-label="${esc(iname(iid))} note"></td></tr>`; }).join("")
     }</tbody></table></div>
     <p class="note">Count each delivered bread and enter what you actually received. Stock in uses the count you enter; if something is lacking, write what happened in the note. It is reported to the manager.</p>`:""}
     <h2>Expenses</h2>
@@ -482,6 +483,9 @@ function renderDay(){
   renderExp(); updateDayTotals();
   renderDayAll();
 }
+/* A received count that matches the delivery is locked for staff (no double counting); the manager can still change it. */
+function rcvLocked(r){ return !M&&r&&r.dlv&&r.rcv!==undefined&&r.rcv!==""&&n(r.rcv)===n(r.dlv.in); }
+function rcvLockHTML(r){ return `<span class="rlock" title="Checked and complete. Only the manager can change it.">${fmt(n(r.rcv))} 🔒</span>`; }
 function lackCell(r){ if(r.rcv===undefined||r.rcv==="") return `<span class="mut">not checked</span>`;
   const x=n(r.rcv)-n(r.dlv&&r.dlv.in); return x<0?`<span class="neg">${fmt(-x)} lacking</span>`:x>0?`<span class="pos">${fmt(x)} extra</span>`:`<span class="pos">complete</span>`; }
 function onRcvInput(el){
@@ -722,7 +726,8 @@ $("dNext").onclick=()=>{ S.dDate=addDays(S.dDate,1); renderDay(); };
 $("dToday").onclick=()=>{ S.dDate=today(); renderDay(); };
 $("dBranches").addEventListener("click",e=>{ const b=e.target.closest("[data-branch]"); if(!b) return; S.dBranch=b.dataset.branch; renderDay(); });
 $("dBody").addEventListener("input",e=>{ const el=e.target; if(!S.dBranch) return; if(el.dataset.iid) onStockInput(el); else if(el.dataset.ei!==undefined) onExpInput(el); else if(el.id==="dCash") onCashInput(el); else if(el.dataset.cn!==undefined) onCntInput(el); else if(el.id==="dFind"){ S.q=el.value; applyFind(); } else if(el.dataset.rcv!==undefined||el.dataset.rnote!==undefined) onRcvInput(el); });
-$("dBody").addEventListener("change",e=>{ if(e.target.tagName==="SELECT"&&e.target.dataset.ei!==undefined) onExpInput(e.target); });
+$("dBody").addEventListener("change",e=>{ const el=e.target; if(el.tagName==="SELECT"&&el.dataset.ei!==undefined) onExpInput(el);
+  else if(el.dataset.rcv!==undefined&&S.dBranch){ const r=((((S.days[S.dDate]||{}).rows||{})[S.dBranch])||{})[el.dataset.rcv]; if(rcvLocked(r)) el.parentNode.innerHTML=rcvLockHTML(r); } });
 $("dBody").addEventListener("click",e=>{
   const d=S.dDate, bid=S.dBranch; if(!bid) return;
   if(e.target.id==="cntGo"){ const h=$("cntH"); if(h) h.scrollIntoView({behavior:"smooth",block:"start"}); const f=document.querySelector('[data-cn="1000"]'); if(f) setTimeout(()=>f.focus({preventScroll:true}),400); return; }
