@@ -988,8 +988,10 @@ function dlvApply(){
   const st=wsAssemble(dlvRecs["delivery/setup"],{})||{}, me=(S.name||"").trim().toLowerCase();
   const bids=(st.branches||[]).filter(b=>(b.name||"").trim().toLowerCase()===me).map(b=>b.id);
   if(!me||!bids.length) return;
-  let setupCh=false;
+  let setupCh=false; const alias={};
   (st.items||[]).filter(d=>d&&d.id&&!d.gone).forEach(d=>{ const i=S.items.find(x=>x.id===d.id);
+    // a bread the branch typed in itself (same name, its own id) takes the delivery, so no duplicate row
+    const same=!i&&S.items.find(x=>!x.gone&&wsMasterKey(x.name)===wsMasterKey(d.name)); if(same){ alias[d.id]=same.id; return; }
     if(!i){ S.items.push({id:d.id,name:d.name||"",price:dnum(d.price)}); setupCh=true; }
     else { if((i.name||"")!==(d.name||"")&&d.name){ i.name=d.name; setupCh=true; } if(!dnum(i.price)&&dnum(d.price)){ i.price=dnum(d.price); setupCh=true; } } });
   if(setupCh) writeSetup();
@@ -999,7 +1001,7 @@ function dlvApply(){
     const m=/^delivery\/setup\/days\/(\d{4}-\d{2}-\d{2})$/.exec(p); if(!m) return; const date=m[1];
     const doc=wsAssemble(dlvRecs[p],{drops:"arr",ready:"arr"})||{}, want={};
     (doc.drops||[]).forEach(dr=>{ if(!dr||dr.void||!bids.includes(dr.bid)) return;
-      Object.keys(dr.items||{}).forEach(iid=>{ const q=dr.items[iid]||{}, w=want[iid]=want[iid]||{in:0,out:0,drs:[]};
+      Object.keys(dr.items||{}).forEach(did=>{ const q=dr.items[did]||{}, iid=alias[did]||did, w=want[iid]=want[iid]||{in:0,out:0,drs:[]};
         w.in+=dnum(q.sent)-dnum(q.damaged); w.out+=dnum(q.pulled); w.drs.push("DR-"+String(dr.no||0).padStart(5,"0")); }); });
     Object.keys(want).forEach(iid=>{ const w=want[iid]; w.in=Math.max(0,w.in); if(!w.in&&!w.out){ delete want[iid]; return; } want[iid]={in:w.in,out:w.out,dr:[...new Set(w.drs)].sort().join(", ")}; });
     const day=S.days[date], main=((day||{}).rows||{}).main||{};
