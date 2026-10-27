@@ -174,6 +174,13 @@ table.chk input[type=number]{width:80px}
 table.chk input.nt{width:100%;min-width:180px;text-align:left}
 td.l,th.l{text-align:left}
 td.wrapcell{white-space:normal;min-width:160px}
+.findbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.findbar input{flex:1 1 200px;min-width:0}
+.findbar [data-az][aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.quick{display:flex;gap:8px;flex-wrap:wrap}
+table.cnt td,table.cnt th{text-align:right}
+table.cnt td:first-child,table.cnt th:first-child{text-align:left;font-weight:600}
+table.cnt input{width:90px;text-align:right}
 .cash-row{display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
 .cash-row input{width:150px;text-align:right}
 .cash-row .cl{font-weight:600}
@@ -290,6 +297,9 @@ td.wrapcell{white-space:normal;min-width:160px}
     <h2>Google Sheet</h2>
     <div class="card"><p class="note" id="shNote"></p>
       <div class="lockbar"><input id="shUrl" placeholder="Paste the Web app URL from Google" style="flex:1;min-width:200px" autocomplete="off"><button class="btn primary" id="shSave">Connect</button><button class="btn" id="shOff">Disconnect</button></div></div>
+    <h2>Delete all entries</h2>
+    <div class="card"><p class="note">Deletes every day's stock, sales, expenses and cash count on this phone and on every phone connected to the Google Sheet. Items, prices and expense categories stay. This cannot be undone, so download a backup first if you may need them.</p>
+      <div class="lockbar"><input id="wipeTxt" autocomplete="off" placeholder="Type DELETE" aria-label="Type DELETE to confirm"><button class="btn danger" id="wipeGo">Delete all entries</button></div></div>
     <h2>Expense categories</h2>
     <div class="sheet">
       <div id="cList"></div>
@@ -308,7 +318,14 @@ const LS="branchsales.offline.lugay.v1", PINK=LS+".pin", BKK=LS+".lastBackup";
 const SEED={"name": "Lugay", "cats": ["Salary", "Rent", "Electricity", "Water", "Supplies", "Transport", "Other"], "items": [{"id": "it_spanish", "name": "Spanish bread", "price": 8}, {"id": "it_pandesal", "name": "Pandesal", "price": 5}, {"id": "it_ensaymada", "name": "Ensaymada", "price": 0}, {"id": "it_cheese", "name": "Cheese bread", "price": 0}, {"id": "it_monay", "name": "Monay", "price": 5}, {"id": "it_pandecoco", "name": "Pan de coco", "price": 0}, {"id": "itmurgnpei489", "name": "Malunggay Pandesal", "price": 0}, {"id": "itmuscdyn74nm", "name": "Buko Pie", "price": 180}]};
 const $=id=>document.getElementById(id);
 const DEFAULT_CATS=["Salary","Rent","Electricity","Water","Supplies","Transport","Other"];
-const S={carry:null,name:"",items:[],branches:[{id:"main",name:""}],cats:DEFAULT_CATS.slice(),days:{},tab:"day",dDate:today(),dBranch:"",rDate:today(),rMode:"month",rBranch:""};
+const S={carry:null,name:"",items:[],branches:[{id:"main",name:""}],cats:DEFAULT_CATS.slice(),days:{},tab:"day",dDate:today(),dBranch:"",rDate:today(),rMode:"month",rBranch:"",q:"",az:(()=>{ try{ return localStorage.getItem(LS+".az")==="1"; }catch(e){ return false; } })()};
+const DENOMS=[1000,500,200,100,50,20,10,5,1];
+const byNm=(a,b)=>iname(a).localeCompare(iname(b),undefined,{sensitivity:"base",numeric:true});
+const hitQ=nm=>!S.q.trim()||nm.toLowerCase().includes(S.q.trim().toLowerCase());
+function applyFind(){ document.querySelectorAll("#dBody tr[data-name]").forEach(r=>r.hidden=!hitQ(r.dataset.name)); }
+function cntOf(d,bid){ return (((S.days[d]||{}).cnt||{})[bid])||{}; }
+function cntTotal(c){ return r2(DENOMS.reduce((t,v)=>t+v*n(c[v]),0)+n(c.other)); }
+function cntHas(c){ return DENOMS.some(v=>n(c[v]))||n(c.other)>0; }
 let db=null, live=false, pendingConfirm=null, M=false, OWN=false; // M = manager (owner/editor): sees past days, reports and setup
 
 /* ---------- dates ---------- */
@@ -392,7 +409,7 @@ function queueDay(date){ if(S.days[date]){ S.days[date].u=Date.now(); if(window.
 async function writeDay(date){
   if(writing[date]){ writing[date]="again"; return; }
   writing[date]=true; setSync("Saving…");
-  try{ const d=S.days[date]||{}; await dayRef(date).set({date,rows:d.rows||{},exp:d.exp||{},cash:d.cash||{},updatedAt:Date.now()}); if(M&&date<today()&&liveIds.has(date)) await db.collection("sales/setup/live").doc(date).delete(); dirty.delete(date); setSync("Saved to your account"); }
+  try{ const d=S.days[date]||{}; await dayRef(date).set({date,rows:d.rows||{},exp:d.exp||{},cash:d.cash||{},cnt:d.cnt||{},updatedAt:Date.now()}); if(M&&date<today()&&liveIds.has(date)) await db.collection("sales/setup/live").doc(date).delete(); dirty.delete(date); setSync("Saved to your account"); }
   catch(e){ setSync("Could not save. Check your connection; changes are kept on this device."); }
   const again=writing[date]==="again"; writing[date]=false; if(again) writeDay(date);
 }
@@ -437,14 +454,17 @@ function renderDay(){
     renderDayAll(); return;
   }
   const bid=S.dBranch, raw=(((S.days[d]||{}).rows||{})[bid])||{};
-  const ids=S.items.map(i=>i.id).concat(Object.keys(raw).filter(k=>!S.items.some(i=>i.id===k)));
+  const ids0=S.items.map(i=>i.id).concat(Object.keys(raw).filter(k=>!S.items.some(i=>i.id===k))), ids=S.az?ids0.slice().sort(byNm):ids0;
+  const cnt=cntOf(d,bid);
   body.innerHTML=`
     <div class="tiles" id="dTiles"></div>
+    <div class="quick"><button class="btn primary" type="button" id="expQuick">+ Add expense</button><button class="btn" type="button" id="cntGo">Cash count</button></div>
     <h2>Stock and sales</h2>
+    <div class="findbar"><input type="search" id="dFind" value="${esc(S.q)}" placeholder="🔍 Search product" aria-label="Search product" autocomplete="off"><button class="btn" type="button" data-az aria-pressed="${!!S.az}" title="Sort by name, A to Z">A–Z</button></div>
     <div class="sheet"><table><thead><tr><th>Item</th><th>Price ₱</th><th>Beginning</th><th>Stock in</th><th>Stock out</th><th>Ending</th><th>Sold</th><th>Sales</th></tr></thead><tbody>${
       ids.map(iid=>{ const r=raw[iid]||{}, c=cell(d,bid,iid);
         const inp=(f,l)=>`<input type="number" min="0" step="1" inputmode="numeric" data-iid="${iid}" data-f="${f}" value="${r[f]===undefined?"":r[f]}" aria-label="${esc(iname(iid))} ${l}">`;
-        return `<tr><td>${esc(iname(iid))}</td><td><input type="number" min="0" step="0.01" inputmode="decimal" data-iid="${iid}" data-f="price" value="${c.price||""}" placeholder="₱"${M?"":" disabled"} aria-label="${esc(iname(iid))} price"></td><td><input type="number" min="0" step="1" inputmode="numeric" data-iid="${iid}" data-f="beg" value="${r.beg!==undefined&&r.beg!==""?r.beg:(c.beg||"")}" placeholder="0" aria-label="${esc(iname(iid))} beginning"></td><td>${r.dlv?`<input type="number" value="${r.in===undefined?"":r.in}" disabled title="From delivery ${esc(r.dlv.dr||"")}" aria-label="${esc(iname(iid))} stock in, from delivery"><span class="dlv">${esc(r.dlv.dr||"delivery")}</span>`:inp("in","stock in")}</td><td>${inp("out","stock out")}</td><td>${inp("end","ending")}</td>${soldCells(iid,c)}</tr>`; }).join("")
+        return `<tr data-name="${esc(iname(iid))}"${hitQ(iname(iid))?"":" hidden"}><td>${esc(iname(iid))}</td><td><input type="number" min="0" step="0.01" inputmode="decimal" data-iid="${iid}" data-f="price" value="${c.price||""}" placeholder="₱"${M?"":" disabled"} aria-label="${esc(iname(iid))} price"></td><td><input type="number" min="0" step="1" inputmode="numeric" data-iid="${iid}" data-f="beg" value="${r.beg!==undefined&&r.beg!==""?r.beg:(c.beg||"")}" placeholder="0" aria-label="${esc(iname(iid))} beginning"></td><td>${r.dlv?`<input type="number" value="${r.in===undefined?"":r.in}" disabled title="From delivery ${esc(r.dlv.dr||"")}" aria-label="${esc(iname(iid))} stock in, from delivery"><span class="dlv">${esc(r.dlv.dr||"delivery")}</span>`:inp("in","stock in")}</td><td>${inp("out","stock out")}</td><td>${inp("end","ending")}</td>${soldCells(iid,c)}</tr>`; }).join("")
     }</tbody><tfoot><tr><td>Total</td><td></td><td id="tot-beg"></td><td id="tot-in"></td><td id="tot-out"></td><td id="tot-end"></td><td id="tot-sold"></td><td id="tot-sales"></td></tr></tfoot></table><form class="add" id="ownAdd" autocomplete="off"><input id="ownName" placeholder="Add a product not from deliveries, e.g. Bottled water" aria-label="New product name" required><input id="ownPrice" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Price ₱" aria-label="New product price" required><button class="btn primary" type="submit">Add</button></form></div>
     ${ids.some(iid=>(raw[iid]||{}).dlv)?`<h2>Delivery check</h2>
     <div class="sheet"><table class="chk"><thead><tr><th>Bread</th><th>Receipt</th><th>Delivered</th><th>Received</th><th>Lacking</th><th class="l">Note</th></tr></thead><tbody>${
@@ -454,8 +474,11 @@ function renderDay(){
     <p class="note">Count each delivered bread and enter what you actually received. Stock in uses the count you enter; if something is lacking, write what happened in the note. It is reported to the manager.</p>`:""}
     <h2>Expenses</h2>
     <div class="sheet" id="dExp"></div>
-    <h2>Cash at closing</h2>
-    <div class="sheet"><div class="cash-row"><label class="cl" for="dCash">Cash on hand at closing ₱</label><input type="number" min="0" step="0.01" inputmode="decimal" id="dCash" value="${cashVal(d,bid)}" placeholder="0.00"><span class="cx" id="dCashX"></span></div></div>`;
+    <h2 id="cntH">Cash count for remittance</h2>
+    <div class="sheet"><table class="cnt"><thead><tr><th>Bills and coins</th><th>Pieces</th><th>Amount</th></tr></thead><tbody>${
+      DENOMS.map(v=>`<tr><td>₱${fmt(v)}</td><td><input type="number" min="0" step="1" inputmode="numeric" data-cn="${v}" value="${cnt[v]===undefined?"":cnt[v]}" placeholder="0" aria-label="${v} peso pieces"></td><td id="cn-${v}">${n(cnt[v])?peso(v*n(cnt[v])):"–"}</td></tr>`).join("")
+    }<tr><td>Centavos / other</td><td><input type="number" min="0" step="0.01" inputmode="decimal" data-cn="other" value="${cnt.other===undefined?"":cnt.other}" placeholder="₱0.00" aria-label="Centavos or other amount"></td><td id="cn-other">${n(cnt.other)?peso(n(cnt.other)):"–"}</td></tr></tbody><tfoot><tr><td>Total counted</td><td></td><td id="cn-tot">${peso(cntTotal(cnt))}</td></tr></tfoot></table>
+    <div class="cash-row"><label class="cl" for="dCash">Cash for remittance ₱</label><input type="number" min="0" step="0.01" inputmode="decimal" id="dCash" value="${cashVal(d,bid)}" placeholder="0.00"><span class="cx" id="dCashX"></span></div></div>`;
   renderExp(); updateDayTotals();
   renderDayAll();
 }
@@ -509,6 +532,15 @@ function updateCashLine(t){
   const x=r2(Number(c)-t.net);
   el.innerHTML=`Expected <b>${peso(t.net)}</b> · <span class="${x<0?"neg":x>0?"pos":""}">${diffLabel(x)}</span>`;
 }
+function onCntInput(el){
+  const d=S.dDate, bid=S.dBranch, day=ensureDay(d), k=el.dataset.cn; day.cnt=Object.assign({},day.cnt); const c=day.cnt[bid]=Object.assign({},day.cnt[bid]);
+  if(el.value==="") delete c[k]; else c[k]=k==="other"?Math.max(0,r2(Number(el.value)||0)):Math.max(0,Math.floor(Number(el.value)||0));
+  const amt=k==="other"?n(c.other):Number(k)*n(c[k]); $("cn-"+k).textContent=amt?peso(amt):"–"; $("cn-tot").textContent=peso(cntTotal(c));
+  if(!cntHas(c)) delete day.cnt[bid];
+  day.cash=Object.assign({},day.cash); if(cntHas(c)) day.cash[bid]=cntTotal(c); else delete day.cash[bid];
+  if($("dCash")) $("dCash").value=cashVal(d,bid);
+  updateDayTotals(); queueDay(d);
+}
 function onCashInput(el){
   const d=S.dDate, bid=S.dBranch, day=ensureDay(d); day.cash=Object.assign({},day.cash);
   if(el.value==="") delete day.cash[bid]; else day.cash[bid]=Math.max(0,r2(Number(el.value)||0));
@@ -533,7 +565,7 @@ function renderDayAll(){
       return `<tr><td><a href="#" data-pick="${bid}">${esc(bname(bid))}</a></td><td>${fmt(t.in)}</td><td>${fmt(t.sold)}</td><td>${fmt(t.out)}</td><td class="${t.left<0?"neg":""}">${fmt(t.left)}</td><td>${peso(t.sales)}</td><td>${peso(t.exp)}</td><td class="${t.net<0?"neg":""}">${peso(t.net)}</td></tr>`; }).join("")
   }</tbody><tfoot><tr><td>Total</td><td>${fmt(T.in)}</td><td>${fmt(T.sold)}</td><td>${fmt(T.out)}</td><td>${fmt(T.left)}</td><td>${peso(T.sales)}</td><td>${peso(T.exp)}</td><td>${peso(T.net)}</td></tr></tfoot></table>`;
 }
-function ensureDay(d){ const x=S.days[d]=S.days[d]||{date:d}; x.rows=x.rows||{}; x.exp=x.exp||{}; x.cash=x.cash||{}; return x; }
+function ensureDay(d){ const x=S.days[d]=S.days[d]||{date:d}; x.rows=x.rows||{}; x.exp=x.exp||{}; x.cash=x.cash||{}; x.cnt=x.cnt||{}; return x; }
 function onStockInput(el){
   const d=S.dDate, bid=S.dBranch, iid=el.dataset.iid, f=el.dataset.f, day=ensureDay(d);
   const br=day.rows[bid]=Object.assign({},day.rows[bid]); const r=br[iid]=Object.assign({},br[iid]);
@@ -689,14 +721,17 @@ $("dPrev").onclick=()=>{ S.dDate=addDays(S.dDate,-1); renderDay(); };
 $("dNext").onclick=()=>{ S.dDate=addDays(S.dDate,1); renderDay(); };
 $("dToday").onclick=()=>{ S.dDate=today(); renderDay(); };
 $("dBranches").addEventListener("click",e=>{ const b=e.target.closest("[data-branch]"); if(!b) return; S.dBranch=b.dataset.branch; renderDay(); });
-$("dBody").addEventListener("input",e=>{ const el=e.target; if(!S.dBranch) return; if(el.dataset.iid) onStockInput(el); else if(el.dataset.ei!==undefined) onExpInput(el); else if(el.id==="dCash") onCashInput(el); else if(el.dataset.rcv!==undefined||el.dataset.rnote!==undefined) onRcvInput(el); });
+$("dBody").addEventListener("input",e=>{ const el=e.target; if(!S.dBranch) return; if(el.dataset.iid) onStockInput(el); else if(el.dataset.ei!==undefined) onExpInput(el); else if(el.id==="dCash") onCashInput(el); else if(el.dataset.cn!==undefined) onCntInput(el); else if(el.id==="dFind"){ S.q=el.value; applyFind(); } else if(el.dataset.rcv!==undefined||el.dataset.rnote!==undefined) onRcvInput(el); });
 $("dBody").addEventListener("change",e=>{ if(e.target.tagName==="SELECT"&&e.target.dataset.ei!==undefined) onExpInput(e.target); });
 $("dBody").addEventListener("click",e=>{
   const d=S.dDate, bid=S.dBranch; if(!bid) return;
-  if(e.target.id==="expAdd"){ const day=ensureDay(d); day.exp[bid]=(day.exp[bid]||[]).concat([{id:newId("ex"),cat:S.cats[0]||"Other",amt:"",note:""}]); renderExp(); const ins=$("dExp").querySelectorAll('input[data-ef="amt"]'); if(ins.length) ins[ins.length-1].focus(); queueDay(d); return; }
+  if(e.target.id==="cntGo"){ const h=$("cntH"); if(h) h.scrollIntoView({behavior:"smooth",block:"start"}); const f=document.querySelector('[data-cn="1000"]'); if(f) setTimeout(()=>f.focus({preventScroll:true}),400); return; }
+  if(e.target.closest("[data-az]")){ S.az=!S.az; try{ localStorage.setItem(LS+".az",S.az?"1":""); }catch(x){} renderDay(); const b=document.querySelector("#dBody [data-az]"); if(b) b.focus(); return; }
+  if(e.target.id==="expAdd"||e.target.id==="expQuick"){ const day=ensureDay(d); day.exp[bid]=(day.exp[bid]||[]).concat([{id:newId("ex"),cat:S.cats[0]||"Other",amt:"",note:""}]); renderExp(); const ins=$("dExp").querySelectorAll('input[data-ef="amt"]'); if(ins.length) ins[ins.length-1].focus(); queueDay(d); return; }
   const del=e.target.closest("[data-edel]");
   if(del){ const day=ensureDay(d); day.exp[bid]=(day.exp[bid]||[]).filter((x,i)=>i!==Number(del.dataset.edel)); if(!day.exp[bid].length) delete day.exp[bid]; renderExp(); updateDayTotals(); renderDayAll(); queueDay(d); }
 });
+$("dBody").addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.target.id==="dFind"){ e.preventDefault(); e.target.blur(); } });
 $("dAll").addEventListener("click",e=>{ const a=e.target.closest("[data-pick]"); if(!a) return; e.preventDefault(); if(activeBranches().some(b=>b.id===a.dataset.pick)){ S.dBranch=a.dataset.pick; renderDay(); } });
 $("rMode").onchange=e=>{ S.rMode=e.target.value; renderReport(); };
 $("rBranch").onchange=e=>{ S.rBranch=e.target.value; renderReport(); };
@@ -892,6 +927,15 @@ $("shSave").onclick=async()=>{ const v=$("shUrl").value.trim();
     if(SHB!=="market"&&!(j.v>=2)){ toast("Update the script in your Google Sheet first, then connect again."); return; } }
   catch(e){ toast("Could not reach that Sheet. Check the link and that access is set to Anyone."); return; }
   lsSet(SHK,v); if(window.WS_SET_SHEET) WS_SET_SHEET(v); Object.keys(S.days).forEach(d=>shPend.add(d)); shSave(); toast("Connected to Google Sheet"); await shPull(); renderShNote(); };
+$("wipeGo").onclick=async()=>{
+  if($("wipeTxt").value.trim().toUpperCase()!=="DELETE"){ toast("Type DELETE in the box first."); return; }
+  if(!confirm("Delete every day's entries? This cannot be undone.")) return;
+  toast("Deleting…"); try{ await shPull(); }catch(e){}
+  const ds=Object.keys(S.days).filter(d=>{ const x=S.days[d]||{}; return [x.rows,x.exp,x.cash,x.cnt].some(o=>o&&Object.keys(o).length); });
+  ds.forEach(d=>{ S.days[d]={date:d,rows:{},exp:{},cash:{},cnt:{}}; queueDay(d); });
+  S.carry={date:today(),end:{}}; saveLocal(); shQueue(null);
+  if(live&&db) db.doc("sales/carry").set({date:S.carry.date,end:{},updatedAt:Date.now()}).catch(()=>{});
+  $("wipeTxt").value=""; render(); toast(ds.length?"Deleted entries for "+ds.length+" day"+(ds.length===1?"":"s")+".":"There were no entries to delete."); };
 $("shOff").onclick=()=>{ if(!confirm("Stop sharing with the Google Sheet on this phone? Entries already sent stay in the Sheet.")) return; lsSet(SHK,""); if(window.WS_SET_SHEET) WS_SET_SHEET(null); renderShNote(); setSync("Saved on this phone only"); };
 window.addEventListener("online",()=>{ shFlush(); shPull(); });
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") shPull(); });
