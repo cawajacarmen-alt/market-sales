@@ -88,6 +88,14 @@
   if (document.body) go(); else document.addEventListener('DOMContentLoaded', go);
 })();
 </script><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}.rlock{display:inline-block;min-width:64px;padding:8px 4px;text-align:right;font-weight:600;color:var(--sold,#2e6b3a)}
+#rcptOv{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;overflow:auto;padding:16px;display:flex;justify-content:center;align-items:flex-start}
+.rsheet{background:#fff;color:#111;width:100%;max-width:340px;padding:16px 14px;border-radius:6px;font:14px/1.35 ui-monospace,Menlo,Consolas,monospace}
+.rsheet .rhead{text-align:center;margin-bottom:10px}.rsheet .rhead b{font-size:16px}.rsheet .rmut{color:#666;font-size:12px}
+.rsheet .ri{padding:6px 0;border-bottom:1px dashed #bbb}.rsheet .rn{font-weight:700}
+.rsheet .rl{display:flex;justify-content:space-between;gap:8px}.rsheet .rl span:last-child{text-align:right;white-space:nowrap}
+.rsheet .rsep{border-top:2px solid #111;margin:8px 0}.rsheet .big{font-size:16px;margin:4px 0}
+.rsheet .rbar{display:flex;gap:8px;justify-content:center;margin-top:14px}
+@media print{body.rcpt-open>*:not(#rcptOv){display:none!important}body.rcpt-open{background:#fff}#rcptOv{position:static;background:none;padding:0;display:block}.rsheet{max-width:none;border-radius:0}.rsheet .rbar{display:none}}
 </style></head><body>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&display=swap">
@@ -394,7 +402,11 @@ function expRows(dates,bFilter){
       (ex[bid]||[]).forEach(e=>{ if(n(e.amt)) out.push({date:d,bid,cat:e.cat||"Other",amt:n(e.amt),note:e.note||""}); }); }); });
   return out;
 }
-function sumStock(list){ const t={beg:0,in:0,out:0,end:0,sold:0,sales:0}; list.forEach(r=>{ t.beg+=r.beg; t.in+=r.in; t.out+=r.out; t.end+=r.end; t.sold+=r.sold; t.sales+=r.sold*(r.price||0); }); t.left=t.end; t.sales=r2(t.sales); return t; }
+function sumStock(list){ const t={beg:0,in:0,out:0,end:0,sold:0,sales:0,tot:0,totAmt:0,endAmt:0}; list.forEach(r=>{ t.beg+=r.beg; t.in+=r.in; t.out+=r.out; t.end+=r.end; t.sold+=r.sold; t.sales+=r.sold*(r.price||0); t.tot+=r.beg+r.in; t.totAmt+=(r.beg+r.in)*(r.price||0); if(r.hasEnd) t.endAmt+=r.end*(r.price||0); }); t.left=t.end; t.sales=r2(t.sales); t.totAmt=r2(t.totAmt); t.endAmt=r2(t.endAmt); return t; }
+// Total stocks = beginning + stock in, with its value at the selling price; End amount = value of the ending count.
+const dash='<td style="color:var(--muted)">—</td>';
+function totCells(c){ const t=c.beg+c.in; return t?`<td>${fmt(t)}</td><td>${peso(t*c.price)}</td>`:dash+dash; }
+function endAmtCell(c){ return c.hasEnd?`<td>${peso(c.end*c.price)}</td>`:dash; }
 const sumExp=list=>r2(list.reduce((a,e)=>a+e.amt,0));
 function totals(sr,er){ const t=sumStock(sr); t.exp=sumExp(er); t.net=r2(t.sales-t.exp); return t; }
 function group(rows,key){ const g={}; rows.forEach(r=>{ (g[r[key]]=g[r[key]]||[]).push(r); }); return g; }
@@ -459,14 +471,14 @@ function renderDay(){
   const cnt=cntOf(d,bid);
   body.innerHTML=`
     <div class="tiles" id="dTiles"></div>
-    <div class="quick"><button class="btn primary" type="button" id="expQuick">+ Add expense</button><button class="btn" type="button" id="cntGo">Cash count</button></div>
+    <div class="quick"><button class="btn primary" type="button" id="expQuick">+ Add expense</button><button class="btn" type="button" id="cntGo">Cash count</button><button class="btn" type="button" id="rcptGo">🧾 Receipt</button></div>
     <h2>Stock and sales</h2>
     <div class="findbar"><input type="search" id="dFind" value="${esc(S.q)}" placeholder="🔍 Search product" aria-label="Search product" autocomplete="off"><button class="btn" type="button" data-az aria-pressed="${!!S.az}" title="Sort by name, A to Z">A–Z</button></div>
-    <div class="sheet"><table><thead><tr><th>Item</th><th>Price ₱</th><th>Beginning</th><th>Stock in</th><th>Stock out</th><th>Ending</th><th>Sold</th><th>Sales</th></tr></thead><tbody>${
+    <div class="sheet"><table><thead><tr><th>Item</th><th>Price ₱</th><th>Beginning</th><th>Stock in</th><th>Total stocks</th><th>Amount</th><th>Stock out</th><th>Ending</th><th>End amount</th><th>Sold</th><th>Sales</th></tr></thead><tbody>${
       ids.map(iid=>{ const r=raw[iid]||{}, c=cell(d,bid,iid);
         const inp=(f,l)=>`<input type="number" min="0" step="1" inputmode="numeric" data-iid="${iid}" data-f="${f}" value="${r[f]===undefined?"":r[f]}" aria-label="${esc(iname(iid))} ${l}">`;
-        return `<tr data-name="${esc(iname(iid))}"${hitQ(iname(iid))?"":" hidden"}><td>${esc(iname(iid))}</td><td><input type="number" min="0" step="0.01" inputmode="decimal" data-iid="${iid}" data-f="price" value="${c.price||""}" placeholder="₱"${M?"":" disabled"} aria-label="${esc(iname(iid))} price"></td><td><input type="number" min="0" step="1" inputmode="numeric" data-iid="${iid}" data-f="beg" value="${r.beg!==undefined&&r.beg!==""?r.beg:(c.beg||"")}" placeholder="0" aria-label="${esc(iname(iid))} beginning"></td><td>${r.dlv?`<input type="number" value="${r.in===undefined?"":r.in}" disabled title="From delivery ${esc(r.dlv.dr||"")}" aria-label="${esc(iname(iid))} stock in, from delivery"><span class="dlv">${esc(r.dlv.dr||"delivery")}</span>`:inp("in","stock in")}</td><td>${inp("out","stock out")}</td><td>${inp("end","ending")}</td>${soldCells(iid,c)}</tr>`; }).join("")
-    }</tbody><tfoot><tr><td>Total</td><td></td><td id="tot-beg"></td><td id="tot-in"></td><td id="tot-out"></td><td id="tot-end"></td><td id="tot-sold"></td><td id="tot-sales"></td></tr></tfoot></table><form class="add" id="ownAdd" autocomplete="off"><input id="ownName" placeholder="Add a product not from deliveries, e.g. Bottled water" aria-label="New product name" required><input id="ownPrice" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Price ₱" aria-label="New product price" required><button class="btn primary" type="submit">Add</button></form></div>
+        return `<tr data-name="${esc(iname(iid))}"${hitQ(iname(iid))?"":" hidden"}><td>${esc(iname(iid))}</td><td><input type="number" min="0" step="0.01" inputmode="decimal" data-iid="${iid}" data-f="price" value="${c.price||""}" placeholder="₱"${M?"":" disabled"} aria-label="${esc(iname(iid))} price"></td><td><input type="number" min="0" step="1" inputmode="numeric" data-iid="${iid}" data-f="beg" value="${r.beg!==undefined&&r.beg!==""?r.beg:(c.beg||"")}" placeholder="0" aria-label="${esc(iname(iid))} beginning"></td><td>${r.dlv?`<input type="number" value="${r.in===undefined?"":r.in}" disabled title="From delivery ${esc(r.dlv.dr||"")}" aria-label="${esc(iname(iid))} stock in, from delivery"><span class="dlv">${esc(r.dlv.dr||"delivery")}</span>`:inp("in","stock in")}</td>${totCells(c)}<td>${inp("out","stock out")}</td><td>${inp("end","ending")}</td>${endAmtCell(c)}${soldCells(iid,c)}</tr>`; }).join("")
+    }</tbody><tfoot><tr><td>Total</td><td></td><td id="tot-beg"></td><td id="tot-in"></td><td id="tot-tot"></td><td id="tot-totAmt"></td><td id="tot-out"></td><td id="tot-end"></td><td id="tot-endAmt"></td><td id="tot-sold"></td><td id="tot-sales"></td></tr></tfoot></table><form class="add" id="ownAdd" autocomplete="off"><input id="ownName" placeholder="Add a product not from deliveries, e.g. Bottled water" aria-label="New product name" required><input id="ownPrice" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Price ₱" aria-label="New product price" required><button class="btn primary" type="submit">Add</button></form></div>
     ${ids.some(iid=>(raw[iid]||{}).dlv)?`<h2>Delivery check</h2>
     <div class="sheet"><table class="chk"><thead><tr><th>Bread</th><th>Receipt</th><th>Delivered</th><th>Received</th><th>Lacking</th><th class="l">Note</th></tr></thead><tbody>${
       ids.filter(iid=>(raw[iid]||{}).dlv).map(iid=>{ const r=raw[iid];
@@ -484,6 +496,25 @@ function renderDay(){
   renderDayAll();
 }
 /* A received count that matches the delivery is locked for staff (no double counting); the manager can still change it. */
+/* ---------- receipt: only the items that have entries, like a POS slip ---------- */
+function openReceipt(d,bid){
+  const sr=stockRows([d],bid).filter(r=>r.beg||r.in||r.out||r.hasEnd).sort((a,b)=>iname(a.iid).localeCompare(iname(b.iid))), er=expRows([d],bid), t=totals(sr,er), cash=cashVal(d,bid);
+  const L=(a,b,cls)=>`<div class="rl${cls?" "+cls:""}"><span>${a}</span><span>${b}</span></div>`;
+  const body=!sr.length?`<p class="rmut">No items entered on this day yet.</p>`:sr.map(r=>`<div class="ri"><div class="rn">${esc(iname(r.iid))}</div>`+
+    L(`Stocks ${fmt(r.beg+r.in)}${r.out?` · out ${fmt(r.out)}`:""}${r.hasEnd?` · end ${fmt(r.end)}`:""}`,"")+
+    (r.hasEnd?L(`Sold ${fmt(r.sold)} × ${peso(r.price)}`,peso(r.sold*r.price)):L(`<i>Not counted yet</i>`,"—"))+`</div>`).join("");
+  const ov=document.createElement("div"); ov.id="rcptOv"; ov.innerHTML=`<div class="rsheet" role="dialog" aria-label="Receipt">
+    <div class="rhead"><b>${esc(S.name||"Branch")}</b><div>${esc(short(d))}, ${esc(d)}</div><div class="rmut">Items with entries only</div></div>
+    ${body}<div class="rsep"></div>
+    ${L("Total stocks",fmt(t.tot)+" pcs")}${L("Stocks amount",peso(t.totAmt))}${L("Sold",fmt(t.sold)+" pcs")}${L("Ending amount",peso(t.endAmt))}
+    ${L("<b>Sales</b>","<b>"+peso(t.sales)+"</b>","big")}
+    ${er.length?er.map(e=>L("Expense: "+esc(e.cat||"Other")+(e.note?" ("+esc(e.note)+")":""),"− "+peso(e.amt))).join("")+L("<b>Net</b>","<b>"+peso(t.net)+"</b>"):""}
+    ${cash!==""?L("Cash counted",peso(Number(cash))):""}
+    <div class="rbar"><button class="btn primary" type="button" id="rcptPrint">🖨 Print</button><button class="btn" type="button" id="rcptClose">Close</button></div></div>`;
+  document.body.appendChild(ov); document.body.classList.add("rcpt-open");
+  const close=()=>{ ov.remove(); document.body.classList.remove("rcpt-open"); };
+  ov.addEventListener("click",e=>{ if(e.target===ov||e.target.id==="rcptClose") close(); else if(e.target.id==="rcptPrint"){ try{ window.print(); }catch(x){ toast("Printing is not available here. Take a screenshot instead."); } } });
+}
 function rcvLocked(r){ return !M&&r&&r.dlv&&r.rcv!==undefined&&r.rcv!==""&&n(r.rcv)===n(r.dlv.in); }
 function rcvLockHTML(r){ return `<span class="rlock" title="Checked and complete. Only the manager can change it.">${fmt(n(r.rcv))} 🔒</span>`; }
 function lackCell(r){ if(r.rcv===undefined||r.rcv==="") return `<span class="mut">not checked</span>`;
@@ -553,7 +584,7 @@ function onCashInput(el){
 function updateDayTotals(){
   const d=S.dDate, bid=S.dBranch, t=totals(stockRows([d],bid),expRows([d],bid));
   updateCashLine(t);
-  if($("tot-in")){ ["beg","in","out","end","sold"].forEach(k=>$("tot-"+k).textContent=fmt(t[k])); $("tot-sales").textContent=peso(t.sales); }
+  if($("tot-in")){ ["beg","in","tot","out","end","sold"].forEach(k=>$("tot-"+k).textContent=fmt(t[k])); ["sales","totAmt","endAmt"].forEach(k=>$("tot-"+k).textContent=peso(t[k])); }
   if($("expTot")) $("expTot").textContent="Total "+peso(t.exp);
   if($("dTiles")) tiles($("dTiles"),t,"");
   const chip=document.querySelector(`[data-branch="${bid}"]`);
@@ -584,7 +615,7 @@ function onStockInput(el){
   if(!["beg","in","out","end"].some(k=>r[k]!==undefined&&r[k]!==""&&(k!=="beg"||n(r[k])))) delete br[iid];
   if(!Object.keys(br).length) delete day.rows[bid];
   const c=cell(d,bid,iid), tds=el.closest("tr").querySelectorAll("td");
-  const tmp=document.createElement("tr"); tmp.innerHTML=soldCells(iid,c); tds[6].replaceWith(tmp.children[0]); tds[7].replaceWith(tmp.children[0]);
+  const tmp=document.createElement("tr"); tmp.innerHTML=soldCells(iid,c); tmp.innerHTML=totCells(c)+endAmtCell(c)+soldCells(iid,c); [4,5,8,9,10].forEach(i=>tds[i].replaceWith(tmp.children[0]));
   updateDayTotals(); renderDayAll(); queueDay(d);
   if(f==="end") queueCarry(d);
 }
@@ -730,6 +761,7 @@ $("dBody").addEventListener("change",e=>{ const el=e.target; if(el.tagName==="SE
   else if(el.dataset.rcv!==undefined&&S.dBranch){ const r=((((S.days[S.dDate]||{}).rows||{})[S.dBranch])||{})[el.dataset.rcv]; if(rcvLocked(r)) el.parentNode.innerHTML=rcvLockHTML(r); } });
 $("dBody").addEventListener("click",e=>{
   const d=S.dDate, bid=S.dBranch; if(!bid) return;
+  if(e.target.id==="rcptGo"){ openReceipt(d,bid); return; }
   if(e.target.id==="cntGo"){ const h=$("cntH"); if(h) h.scrollIntoView({behavior:"smooth",block:"start"}); const f=document.querySelector('[data-cn="1000"]'); if(f) setTimeout(()=>f.focus({preventScroll:true}),400); return; }
   if(e.target.closest("[data-az]")){ S.az=!S.az; try{ localStorage.setItem(LS+".az",S.az?"1":""); }catch(x){} renderDay(); const b=document.querySelector("#dBody [data-az]"); if(b) b.focus(); return; }
   if(e.target.id==="expAdd"||e.target.id==="expQuick"){ const day=ensureDay(d); day.exp[bid]=(day.exp[bid]||[]).concat([{id:newId("ex"),cat:S.cats[0]||"Other",amt:"",note:""}]); renderExp(); const ins=$("dExp").querySelectorAll('input[data-ef="amt"]'); if(ins.length) ins[ins.length-1].focus(); queueDay(d); return; }
