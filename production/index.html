@@ -238,12 +238,13 @@ td.sub2{white-space:normal}
         <label class="wide">Note<input id="oNote" placeholder="Optional, e.g. for market branch"></label>
       </div>
       <div class="bar"><button class="btn primary" type="submit">Create order</button><span class="note" id="oExp"></span></div>
+      <div class="bar" id="oCopy" hidden></div>
     </form>
     <div class="bar" id="oFilter"></div>
     <div id="oList" style="display:flex;flex-direction:column;gap:10px"></div>
     <h2>Day summary by bread</h2>
     <div class="sheet" id="dSheet"></div>
-    <p class="note">Each order goes through 4 steps: <b>Ordered</b> (assigned to a baker), <b>Baking</b> (baker started), <b>Counted</b> (production team counts the yield output), <b>Inspected</b> (after baking, pieces that pass quality inspection are released for delivery; damaged pieces are not released). Expected = batches × yield per batch from Breads &amp; bakers.</p>
+    <p class="note">On a day with no orders yet, <b>Same as</b> copies the last day's orders (bread, batches, baker) so you only adjust what changed. Each order goes through 4 steps: <b>Ordered</b> (assigned to a baker), <b>Baking</b> (baker started), <b>Counted</b> (production team counts the yield output), <b>Inspected</b> (after baking, pieces that pass quality inspection are released for delivery; damaged pieces are not released). Expected = batches × yield per batch from Breads &amp; bakers.</p>
   </section>
 
   <!-- TALLY -->
@@ -258,7 +259,7 @@ td.sub2{white-space:normal}
     <div class="syncbox" id="tSync"></div>
     <div class="tiles" id="tTiles"></div>
     <div class="sheet" id="tSheet"></div>
-    <p class="note">Released is the pieces that passed quality inspection in Production orders. Went out is what Branch Deliveries shows as delivered to branches plus the bread in that day's online orders (cancelled orders not counted). <b>Short</b> means the bakery released more than reached the branches and online orders. <b>Over</b> means more went out than the bakery released. Left at bakery = Made − Damaged − Went out. Pull-outs and damage at the branches are shown for reference but do not change the tally.</p>
+    <p class="note">Released is the pieces that passed quality inspection in Production orders. Went out is what Branch Deliveries shows as delivered to branches plus the bread in that day's online orders (cancelled orders not counted), plus what peddlers took minus what they brought back in Peddler Sales. <b>Short</b> means the bakery released more than reached the branches and online orders. <b>Over</b> means more went out than the bakery released. Left at bakery = Made − Damaged − Went out. Pull-outs and damage at the branches are shown for reference but do not change the tally.</p>
     <h2>Recent days</h2>
     <div class="sheet" id="tDays"></div>
   </section>
@@ -313,7 +314,7 @@ td.sub2{white-space:normal}
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<script>window.WS_CFG={"app": "prd", "name": "Bakery Production", "split": [["^bakery/log/days/", {"orders": "map"}]], "seed": {"bakery/log": {"bakers": [{"id": "kmusca9l7p0o", "name": "NILo"}], "products": [{"id": "bmusdj511eke", "name": "Monay", "price": 5, "yield": 500}, {"id": "bmusdk1be8eb", "name": "Pandesal Malunggay", "price": 5, "yield": 50}, {"id": "bmusc9xgyo97", "name": "Buko Pie", "price": 180, "yield": 8}]}}, "minV": 4, "feeds": {"dlv": {"prefix": ["delivery/setup"], "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]]}, "ord": {"prefix": ["days/", "app/setup"], "split": [["^days/", {"orders": "map", "collections": "map"}]]}}, "local": "^bakery/(log/links/|sync$)", "clear": {"re": "^bakery/log/days/", "what": "production entry (all days)", "keep": "Breads, bakers and yields"}};
+<script>window.WS_CFG={"app": "prd", "name": "Bakery Production", "split": [["^bakery/log/days/", {"orders": "map"}]], "seed": {"bakery/log": {"bakers": [{"id": "kmusca9l7p0o", "name": "NILo"}], "products": [{"id": "bmusdj511eke", "name": "Monay", "price": 5, "yield": 500}, {"id": "bmusdk1be8eb", "name": "Pandesal Malunggay", "price": 5, "yield": 50}, {"id": "bmusc9xgyo97", "name": "Buko Pie", "price": 180, "yield": 8}]}}, "minV": 4, "feeds": {"dlv": {"prefix": ["delivery/setup"], "split": [["^delivery/setup/days/", {"drops": "arr", "ready": "arr"}]]}, "ord": {"prefix": ["days/", "app/setup"], "split": [["^days/", {"orders": "map", "collections": "map"}]]}, "pdl": {"prefix": ["pdl/days/", "pdl/setup$"], "split": [["^pdl/days/", {"peddlers": "map"}]]}}, "local": "^bakery/(log/links/|sync$)", "clear": {"re": "^bakery/log/days/", "what": "production entry (all days)", "keep": "Breads, bakers and yields"}};
 // Shared by the website pages and the Google Sheet script: one saved record per document.
 // A record keeps each piece of a document with the time it last changed, so two phones that
 // change different orders or receipts on the same day both keep their change.
@@ -364,8 +365,9 @@ function wsStamp(rec, doc, sp, now) {
   return out;
 }
 
-// Production website Tally: what went out per bread per day, from the Deliveries and Online Orders websites.
+// Production website Tally: what went out per bread per day, from the Deliveries, Online Orders and Peddler Sales websites.
 // Same as the Claude routine: delivery receipts (not void) per branch, and every non-cancelled online order.
+// Peddlers: bread taken minus bread returned, per peddler sheet.
 window.WS_DERIVE = function (F, own) {
   var D = F.dlv || {}, O = F.ord || {}, key = function (s) { return String(s || '').toLowerCase().split(/\s+/).filter(Boolean).join(' '); };
   var num = function (v) { var x = Number(v); return isFinite(x) && x > 0 ? x : 0; };
@@ -373,7 +375,7 @@ window.WS_DERIVE = function (F, own) {
   var want = {};
   var cell = function (date, name) { var doc = want[date] = want[date] || { date: date, items: {}, orders: 0 };
     var k = byName[key(name)] || 'x:' + (key(name) || 'unknown');
-    return doc.items[k] = doc.items[k] || { name: name, branch: 0, online: 0, pulled: 0, bdmg: 0, by: {} }; };
+    return doc.items[k] = doc.items[k] || { name: name, branch: 0, online: 0, peddler: 0, ptaken: 0, pret: 0, pulled: 0, bdmg: 0, by: {} }; };
   var ds = D['delivery/setup'] || {}, items = {}, branches = {};
   (ds.items || []).forEach(function (i) { items[i.id] = i.name || '(removed item)'; });
   (ds.branches || []).forEach(function (b) { branches[b.id] = b.name || 'branch'; });
@@ -392,8 +394,19 @@ window.WS_DERIVE = function (F, own) {
       (o.items || []).forEach(function (i) { var q = num(i.qty); if (!q) return; cell(m[1], i.name || oitems[i.id] || '(removed item)').online += q; got = true; });
       if (got) want[m[1]].orders++; });
   });
+  var P = F.pdl || {}, pitems = {};
+  ((P['pdl/setup'] || {}).items || []).forEach(function (i) { pitems[i.id] = i.name; });
+  Object.keys(P).forEach(function (p) {
+    var m = /^pdl\/days\/(\d{4}-\d{2}-\d{2})$/.exec(p); if (!m) return;
+    var recs = P[p].peddlers || {};
+    Object.keys(recs).forEach(function (pid) { var r = recs[pid] || {}, q = {};
+      (r.loads || []).forEach(function (l) { Object.keys(l.q || {}).forEach(function (iid) { q[iid] = q[iid] || { t: 0, b: 0 }; q[iid].t += num((l.q || {})[iid]); }); });
+      Object.keys(r.ret || {}).forEach(function (iid) { q[iid] = q[iid] || { t: 0, b: 0 }; q[iid].b += num(r.ret[iid]); });
+      Object.keys(q).forEach(function (iid) { if (!(q[iid].t || q[iid].b)) return;
+        var c = cell(m[1], pitems[iid] || '(removed item)'); c.ptaken += q[iid].t; c.pret += q[iid].b; c.peddler = Math.max(0, c.ptaken - c.pret); }); });
+  });
   var out = {};
-  Object.keys(want).forEach(function (d) { var doc = want[d]; doc.out = 0; Object.keys(doc.items).forEach(function (k) { doc.out += doc.items[k].branch + doc.items[k].online; }); out['bakery/log/links/' + d] = doc; });
+  Object.keys(want).forEach(function (d) { var doc = want[d]; doc.out = 0; Object.keys(doc.items).forEach(function (k) { doc.out += doc.items[k].branch + doc.items[k].online + doc.items[k].peddler; }); out['bakery/log/links/' + d] = doc; });
   var prev = own('bakery/sync'), sig = JSON.stringify(out);
   out['bakery/sync'] = prev && prev.sig === sig ? prev : { at: Date.now(), ok: true, sig: sig };
   return out;
@@ -820,7 +833,7 @@ function renderDay(){
    <div class="tile"><span class="k"><i style="background:var(--made)"></i>Counted</span><span class="v">${fmt(t.made)}</span><span class="s">${t.expected?"of "+fmt(t.expected)+" expected":"pieces of yield output"}</span></div>
    <div class="tile"><span class="k"><i style="background:var(--rel)"></i>Released</span><span class="v">${fmt(t.released)}</span><span class="s">passed inspection${waiting?" · "+fmt(waiting)+" waiting":""}</span></div>
    <div class="tile"><span class="k"><i style="background:var(--dmg)"></i>Damaged</span><span class="v">${fmt(t.damaged)}</span><span class="s"><span class="pill ${pct(t.damaged,t.made)>=5?"hi":"lo"}">${pctTxt(pct(t.damaged,t.made))} of counted</span></span></div>`;
-  renderOrderForm();
+  renderOrderForm(); renderCopy(d,live);
   const F=S.oFilter||"all", counts={all:os.length,open:live.filter(o=>o.status!=="inspected").length,inspected:cnt("inspected")};
   $("oFilter").innerHTML=os.length?[["all","All"],["open","Not finished"],["inspected","Inspected"]].map(([k,l])=>`<button type="button" class="chip" data-f="${k}" aria-pressed="${F===k}">${l} ${counts[k]}</button>`).join(""):"";
   const shown=os.filter(o=>F==="all"||(F==="open"?o.status!=="inspected"&&o.status!=="cancelled":o.status==="inspected"));
@@ -831,6 +844,20 @@ function renderDay(){
   $("dSheet").innerHTML=!pids.length?`<div class="empty">Nothing yet.</div>`:`<table><thead><tr><th>Bread</th><th>Batches</th><th>Expected</th><th>Counted</th><th>Passed (released)</th><th>Damaged</th><th>Damage %</th></tr></thead><tbody>${
     pids.map(id=>{ const r=rowOf(d,id), dp=pct(r.damaged,r.made); return `<tr><td>${esc(pname(id))}</td><td>${fmt(r.batches)}</td><td>${r.expected?fmt(r.expected):"–"}</td><td>${fmt(r.made)}${diffTxt(r)}</td><td>${fmt(r.released)}</td><td>${fmt(r.damaged)}</td><td>${r.made?`<span class="pill ${dp>=5?"hi":"lo"}">${pctTxt(dp)}</span>`:"–"}</td></tr>`; }).join("")
   }</tbody></table>${legacy?`<p class="note" style="padding:8px 12px">This day was logged before production orders.</p>`:""}`;
+}
+// "Same as <day>": the latest earlier day (up to 14 days back) that has orders, offered while this day has none.
+function copySource(d){ for(let i=1;i<=14;i++){ const p=addDays(d,-i), os=dayOrders(p).filter(o=>o.status!=="cancelled"&&o.pid); if(os.length) return {date:p,orders:os}; } return null; }
+function renderCopy(d,live){
+  const el=$("oCopy"), src=!live.length&&copySource(d);
+  el.hidden=!src; if(!src) return;
+  el.innerHTML=`<button class="btn" type="button" id="oCopyBtn">Same as ${esc(nice(src.date))}</button><span class="note">Adds ${src.orders.length} order${src.orders.length===1?"":"s"}: ${esc(src.orders.map(o=>pname(o.pid)+" ×"+fmt(n(o.batches))).join(", "))}. You can change or cancel any of them after.</span>`;
+}
+function copyOrders(){
+  const d=S.dDate, src=copySource(d); if(!src||dayOrders(d).some(o=>o.status!=="cancelled")) return;
+  S.days[d]=S.days[d]||{date:d,rows:{},orders:{}}; S.days[d].orders=Object.assign({},S.days[d].orders||{});
+  let no=dayOrders(d).reduce((m,o)=>Math.max(m,o.no||0),0); const now=Date.now();
+  src.orders.forEach(o=>{ no++; const x={no,pid:o.pid,batches:n(o.batches),baker:o.baker||"",note:o.note||"",status:"ordered",at:{ordered:now}}; S.days[d].orders[newId("o")]=x; });
+  queueDay(d); renderDay(); toast(src.orders.length+" order"+(src.orders.length===1?"":"s")+" added, same as "+nice(src.date));
 }
 function setOrder(date,id,patch){
   S.days[date]=S.days[date]||{date,rows:{},orders:{}}; S.days[date].orders=Object.assign({},S.days[date].orders||{});
@@ -972,16 +999,16 @@ function tallyRows(d){
   const L=(S.links[d]&&S.links[d].items)||{}, rowsP=(S.days[d]&&S.days[d].rows)||{};
   const ids=[...new Set(S.products.map(p=>p.id).concat(Object.keys(rowsP)).concat(Object.keys(L)))];
   return ids.map(id=>{
-    const r=rowOf(d,id), l=L[id]||{}, branch=n(l.branch), online=n(l.online), out=branch+online;
+    const r=rowOf(d,id), l=L[id]||{}, branch=n(l.branch), online=n(l.online), peddler=n(l.peddler), out=branch+online+peddler;
     const name=id.startsWith("x:")?(l.name||id.slice(2)):pname(id);
-    return {id,name,unlisted:id.startsWith("x:"),made:r.made,damaged:r.damaged,released:r.released,branch,online,out,
+    return {id,name,unlisted:id.startsWith("x:"),made:r.made,damaged:r.damaged,released:r.released,branch,online,peddler,ptaken:n(l.ptaken),pret:n(l.pret),out,
       pulled:n(l.pulled),bdmg:n(l.bdmg),by:l.by||{},diff:r.released-out,left:r.made-r.damaged-out};
   }).filter(x=>x.made||x.damaged||x.released||x.out||x.pulled||x.bdmg);
 }
-function tallyTotals(rows){ const t={made:0,damaged:0,released:0,branch:0,online:0,out:0,left:0,bad:0}; rows.forEach(x=>{["made","damaged","released","branch","online","out","left"].forEach(k=>t[k]+=x[k]); if(x.diff) t.bad++;}); t.diff=t.released-t.out; return t; }
+function tallyTotals(rows){ const t={made:0,damaged:0,released:0,branch:0,online:0,peddler:0,out:0,left:0,bad:0}; rows.forEach(x=>{["made","damaged","released","branch","online","peddler","out","left"].forEach(k=>t[k]+=x[k]); if(x.diff) t.bad++;}); t.diff=t.released-t.out; return t; }
 function renderSync(){
   const el=$("tSync"); if(!el) return; const sy=S.sync;
-  el.innerHTML=`<div><b>Deliveries and online orders come in by themselves</b><span class="note">${sy&&sy.at?(sy.ok===false?`<span style="color:var(--dmg)">The last update did not finish (${ago(sy.at)}): ${esc(sy.msg||"")}</span>`:`Last updated ${ago(sy.at)}`):"Not updated yet"} · updates by itself within a minute</span></div>${S.canFire?`<button class="btn" id="tSyncNow">Update now</button>`:""}`;
+  el.innerHTML=`<div><b>Deliveries, online orders and peddler sales come in by themselves</b><span class="note">${sy&&sy.at?(sy.ok===false?`<span style="color:var(--dmg)">The last update did not finish (${ago(sy.at)}): ${esc(sy.msg||"")}</span>`:`Last updated ${ago(sy.at)}`):"Not updated yet"} · updates by itself within a minute</span></div>${S.canFire?`<button class="btn" id="tSyncNow">Update now</button>`:""}`;
 }
 function renderTally(){
   const d=S.tDate; $("tDate").value=d; $("tLabel").textContent=nice(d)+(d===today()?" · today":"");
@@ -989,18 +1016,19 @@ function renderTally(){
   const rows=tallyRows(d), t=tallyTotals(rows);
   $("tTiles").innerHTML=`
    <div class="tile"><span class="k"><i style="background:var(--rel)"></i>Released</span><span class="v">${fmt(t.released)}</span><span class="s">passed inspection</span></div>
-   <div class="tile"><span class="k"><i style="background:var(--made)"></i>Went out</span><span class="v">${fmt(t.out)}</span><span class="s">${fmt(t.branch)} to branches · ${fmt(t.online)} online</span></div>
+   <div class="tile"><span class="k"><i style="background:var(--made)"></i>Went out</span><span class="v">${fmt(t.out)}</span><span class="s">${fmt(t.branch)} to branches · ${fmt(t.online)} online${t.peddler?" · "+fmt(t.peddler)+" peddlers":""}</span></div>
    <div class="tile"><span class="k"><i style="background:var(--dmg)"></i>Difference</span><span class="v" style="${t.diff?"color:var(--dmg)":""}">${t.diff>0?"−"+fmt(t.diff):t.diff<0?"+"+fmt(-t.diff):"0"}</span><span class="s">${t.diff>0?"short: released but not delivered":t.diff<0?"over: delivered more than released":"released = went out"}</span></div>
    <div class="tile"><span class="k"><i style="background:var(--left)"></i>Breads</span><span class="v">${rows.length?(rows.length-t.bad)+"/"+rows.length:"–"}</span><span class="s">${!rows.length?"nothing logged":t.bad?t.bad+" not tallying":"all tally"}</span></div>`;
   if(!rows.length){ $("tSheet").innerHTML=`<div class="empty">Nothing made or sent out on this day yet.</div>`; }
-  else $("tSheet").innerHTML=`<table><thead><tr><th>Bread</th><th>Made</th><th>Damaged</th><th>Released</th><th>To branches</th><th>Online</th><th>Went out</th><th>Check</th><th>Left at bakery</th></tr></thead><tbody>${
+  const pc=t.peddler||rows.some(x=>x.ptaken);
+  if(rows.length) $("tSheet").innerHTML=`<table><thead><tr><th>Bread</th><th>Made</th><th>Damaged</th><th>Released</th><th>To branches</th><th>Online</th>${pc?"<th>Peddlers</th>":""}<th>Went out</th><th>Check</th><th>Left at bakery</th></tr></thead><tbody>${
     rows.map(x=>{ const by=Object.entries(x.by).map(([b,q])=>esc(b)+" "+fmt(q)).join(" · ");
       const extra=[x.pulled?fmt(x.pulled)+" pulled out":"",x.bdmg?fmt(x.bdmg)+" damaged at branch":""].filter(Boolean).join(", ");
-      return `<tr><td>${esc(x.name)}${x.unlisted?`<span class="sub">not in your bread list; check the name in Branch Deliveries or Online orders</span>`:""}</td>
+      return `<tr><td>${esc(x.name)}${x.unlisted?`<span class="sub">not in your bread list; check the name in Branch Deliveries, Online orders or Peddler Sales</span>`:""}</td>
       <td>${fmt(x.made)}</td><td>${fmt(x.damaged)}</td><td>${fmt(x.released)}</td>
       <td>${fmt(x.branch)}${by?`<span class="sub">${by}</span>`:""}${extra?`<span class="sub">${extra}</span>`:""}</td>
-      <td>${fmt(x.online)}</td><td>${fmt(x.out)}</td><td>${chk(x.diff,x.released,x.out)}</td><td class="${x.left<0?"neg":""}">${fmt(x.left)}</td></tr>`; }).join("")
-  }</tbody><tfoot><tr><td>Total</td><td>${fmt(t.made)}</td><td>${fmt(t.damaged)}</td><td>${fmt(t.released)}</td><td>${fmt(t.branch)}</td><td>${fmt(t.online)}</td><td>${fmt(t.out)}</td><td>${chk(t.diff,t.released,t.out)}</td><td class="${t.left<0?"neg":""}">${fmt(t.left)}</td></tr></tfoot></table>`;
+      <td>${fmt(x.online)}</td>${pc?`<td>${fmt(x.peddler)}${x.ptaken?`<span class="sub">${fmt(x.ptaken)} taken · ${fmt(x.pret)} returned</span>`:""}</td>`:""}<td>${fmt(x.out)}</td><td>${chk(x.diff,x.released,x.out)}</td><td class="${x.left<0?"neg":""}">${fmt(x.left)}</td></tr>`; }).join("")
+  }</tbody><tfoot><tr><td>Total</td><td>${fmt(t.made)}</td><td>${fmt(t.damaged)}</td><td>${fmt(t.released)}</td><td>${fmt(t.branch)}</td><td>${fmt(t.online)}</td>${pc?`<td>${fmt(t.peddler)}</td>`:""}<td>${fmt(t.out)}</td><td>${chk(t.diff,t.released,t.out)}</td><td class="${t.left<0?"neg":""}">${fmt(t.left)}</td></tr></tfoot></table>`;
   const all=[...new Set(Object.keys(S.days).concat(Object.keys(S.links)))].filter(k=>k<=today()).sort().reverse().slice(0,14);
   const dr=all.map(k=>{ const rs=tallyRows(k); return {k,rs,t:tallyTotals(rs)}; }).filter(x=>x.rs.length);
   $("tDays").innerHTML=dr.length?`<table><thead><tr><th>Day</th><th>Released</th><th>Went out</th><th>Check</th><th style="text-align:left">Breads not tallying</th></tr></thead><tbody>${
@@ -1021,6 +1049,7 @@ $("dPrev").onclick=()=>{ S.dDate=addDays(S.dDate,-1); renderDay(); };
 $("dNext").onclick=()=>{ S.dDate=addDays(S.dDate,1); renderDay(); };
 $("dToday").onclick=()=>{ S.dDate=today(); renderDay(); };
 $("oList").addEventListener("click",onOrderAct);
+$("oCopy").addEventListener("click",e=>{ if(e.target.closest("#oCopyBtn")) copyOrders(); });
 $("oFilter").addEventListener("click",e=>{ const c=e.target.closest("[data-f]"); if(!c) return; S.oFilter=c.dataset.f; renderDay(); });
 $("oBread").addEventListener("change",updExp); $("oBatches").addEventListener("input",updExp);
 $("oNew").addEventListener("submit",e=>{
