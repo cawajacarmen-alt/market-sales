@@ -1,4 +1,4 @@
-// Bakery and pharmacy websites — Google Sheet connector (version 7: branch sales, deliveries, online orders, production, peddler sales and EDPMS upload sheets in one Sheet, with staff logins).
+// Bakery and pharmacy websites — Google Sheet connector (version 8: branch sales, deliveries, online orders, production, peddler sales, EDPMS upload sheets and the employee Time Clock in one Sheet, with staff logins).
 // Paste this into Extensions > Apps Script of your Google Sheet, then Deploy > New deployment >
 // Web app, Execute as: Me, Who has access: Anyone. Copy the Web app URL into the app (Branch & items > Google Sheet).
 //
@@ -10,12 +10,16 @@
 //                 Staff logins: one row per person. Name, PIN, Sites (all, or e.g. market, deliveries), Manager (yes / no).
 //                 EDPMS staff: Sites edpms-mercedes (one branch) or edpms (every branch).
 //                 Delete a row to remove someone's access.
+//                 Time clock: one row per Time in / Time out (for you to read).
+//                 Time clock staff: Payroll ID, Name, PIN, Branch, Business, Active. Filled from Payroll by itself;
+//                   new employees get a random 4-digit PIN. Change a PIN by typing over it. Active "no" hides someone.
+//                 Time clock photos: the small photo taken at each punch (when photos are on).
 //
 // To update an existing connection: paste this over the old script, Save, then
 // Deploy > Manage deployments > pencil icon > Version: New version > Deploy. The Web app URL stays the same.
 
 const DATA = 'Data (do not edit)';
-const VERSION = 7;
+const VERSION = 8;
 const NAMES = { market: 'Market', mabuhay: 'Mabuhay', mercedes: 'Mercedes', lugay: 'Lugay', main: 'Main Branch' };
 
 // Market keeps the original keys and tab names, so its earlier entries stay where they are.
@@ -30,6 +34,7 @@ function doGet(e) {
   if (action === 'ping') return out_({ ok: true, v: VERSION });
   if (action === 'login') return out_(login_(e.parameter));
   if (action === 'docs') return out_(appGet_(e.parameter.app, Number(e.parameter.since) || 0));
+  if (action.indexOf('tc') === 0) return out_(tcGet_(action, e.parameter));
   const br = branch_(e.parameter.b);
   const rows = sheet_(DATA, ['Key', 'Saved data', 'Updated']).getDataRange().getValues().slice(1);
   const days = {};
@@ -53,6 +58,7 @@ function doPost(e) {
   try {
     const b = JSON.parse(e.postData.contents);
     if (b.action === 'docs') return out_(appPost_(b.app, b.docs || {}));
+    if (String(b.action || '').indexOf('tc') === 0) return out_(tcPost_(b));
     const br = branch_(b.b);
     const store = sheet_(DATA, ['Key', 'Saved data', 'Updated']);
     const vals = store.getDataRange().getValues();
@@ -309,4 +315,145 @@ function login_(q) {
 function pinEq_(a, b) {
   const x = String(a).trim(), y = String(b || '').trim();
   return !!y && (x === y || (/^\d+$/.test(y) && x !== '' && Number(x) === Number(y)));
+}
+
+// ---------- Time clock ----------
+// Employees tap Time in / Time out on the store tablet or on their own phone (Time Clock website).
+// Each punch is one row in "Time clock". The Payroll sync reads them every two hours and fills the time cards.
+const TC_TZ = 'Asia/Manila', TC_STAFF = 'Time clock staff', TC_LOG = 'Time clock', TC_PH = 'Time clock photos';
+const TC_HEAD = ['Date', 'Time', 'Name', 'In / Out', 'Where', 'Location', 'Status', 'Received', 'Punch ID', 'Staff key', 'Photo', 'Time (ms)'];
+const TC_DEF = { places: [], photo: { kiosk: true, phone: true }, gps: 'warn' };
+
+function tcStaffSheet_() {
+  const sh = sheet_(TC_STAFF, ['Payroll ID', 'Name', 'PIN', 'Branch', 'Business', 'Active']);
+  sh.getRange('C:C').setNumberFormat('@');
+  return sh;
+}
+function tcStaff_() {
+  return tcStaffSheet_().getDataRange().getValues().slice(1).map(function (r, i) {
+    return { row: i + 2, id: String(r[0]).trim(), name: String(r[1]).replace(/\s+/g, ' ').trim(), pin: String(r[2]).trim(), branch: String(r[3]).trim(),
+      biz: String(r[4]).trim(), active: !/^(n|no|hindi|false|0|inactive)$/i.test(String(r[5]).trim()) };
+  }).filter(function (s) { return s.name; });
+}
+// Staff key: the Payroll ID, or "n:<name>" for someone typed into the tab by hand.
+function tcKey_(s) { return s.id || ('n:' + s.name.toLowerCase()); }
+function tcPin_(p) { p = String(p == null ? '' : p).trim(); return /^\d+$/.test(p) ? String(Number(p)) : p; }
+// Same small check as the website, so a tablet can check a PIN without internet.
+function tcHash_(key, pin) {
+  const s = key + '|' + tcPin_(pin); let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+function tcSetup_() {
+  const v = sheet_(DATA, ['Key', 'Saved data', 'Updated']).getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) if (String(v[i][0]) === 'tc:setup') { try { return Object.assign({}, TC_DEF, JSON.parse(v[i][1])); } catch (x) {} }
+  return JSON.parse(JSON.stringify(TC_DEF));
+}
+function tcLogSheet_() {
+  const sh = sheet_(TC_LOG, TC_HEAD);
+  return sh;
+}
+function tcFmt_(ms, f) { return Utilities.formatDate(new Date(ms), TC_TZ, f); }
+function tcRows_(from, to) {
+  const v = tcLogSheet_().getDataRange().getValues().slice(1), out = [];
+  v.forEach(function (r) {
+    const d = day_(r[0]); if ((from && d < from) || (to && d > to)) return;
+    out.push({ id: String(r[8]), k: String(r[9]), name: String(r[2]), type: /out/i.test(String(r[3])) ? 'out' : 'in', t: Number(r[11]) || 0,
+      date: d, where: String(r[4]), loc: String(r[5]), status: String(r[6]), photo: String(r[10]) === 'yes' });
+  });
+  return out;
+}
+function tcMgr_(q) { const r = login_({ name: q.name, pin: q.pin, site: 'timeclock' }); return r.ok && r.manager ? r : null; }
+
+function tcGet_(action, q) {
+  if (action === 'tcroster') {
+    const staff = tcStaff_().filter(function (s) { return s.active && s.pin; }).map(function (s) {
+      const k = tcKey_(s); return { k: k, name: s.name, branch: s.branch, biz: s.biz, h: tcHash_(k, s.pin) };
+    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+    return { ok: true, v: VERSION, t: Date.now(), staff: staff, setup: tcSetup_() };
+  }
+  if (action === 'tcpunches') { // for the Payroll sync and the manager's list (no photos)
+    return { ok: true, v: VERSION, t: Date.now(), punches: tcRows_(String(q.from || ''), String(q.to || '')) };
+  }
+  if (action === 'tcmine') { // one person's recent punches, for "you timed in at 7:58"
+    const s = tcStaff_().filter(function (x) { return tcKey_(x) === q.k; })[0];
+    if (!s || tcHash_(q.k, s.pin) !== q.h) return { ok: false, v: VERSION, pin: true };
+    const from = tcFmt_(Date.now() - 3 * 86400000, 'yyyy-MM-dd');
+    return { ok: true, v: VERSION, t: Date.now(), punches: tcRows_(from, '').filter(function (p) { return p.k === q.k; }).slice(-12) };
+  }
+  if (action === 'tcphotos') { // manager only
+    if (!tcMgr_(q)) return { ok: false, v: VERSION, auth: true };
+    const v = sheet_(TC_PH, ['Punch ID', 'Date', 'Name', 'Photo']).getDataRange().getValues().slice(1), photos = {};
+    v.forEach(function (r) { if (day_(r[1]) === q.date) photos[String(r[0])] = String(r[3]); });
+    return { ok: true, v: VERSION, photos: photos };
+  }
+  return { ok: false, v: VERSION, error: 'unknown action' };
+}
+
+function tcPost_(b) {
+  if (b.action === 'tcpunch') {
+    const staff = {}, sh = tcLogSheet_(), seen = {}, done = [], now = Date.now();
+    tcStaff_().forEach(function (s) { staff[tcKey_(s)] = s; });
+    const n = sh.getLastRow();
+    if (n > 1) sh.getRange(2, 9, n - 1, 1).getValues().forEach(function (r) { seen[String(r[0])] = 1; });
+    const rows = [], photos = [];
+    (b.punches || []).forEach(function (p) {
+      const id = String(p.id || ''); if (!id) return;
+      if (seen[id]) { done.push(id); return; }
+      const s = staff[p.k], t = Number(p.t) || now, st = [];
+      if (!s) st.push('Not on the staff list');
+      else if (tcHash_(p.k, s.pin) !== p.h) st.push('Wrong PIN (not counted)');
+      const late = Math.round((now - t) / 60000);
+      if (late > 20) st.push('Sent ' + (late >= 120 ? Math.round(late / 60) + ' hrs' : late + ' min') + ' later (no internet)');
+      if (late < -10) st.push('Phone clock ahead');
+      let loc = '';
+      if (p.mode === 'phone') {
+        if (p.dist == null) loc = p.gpsErr ? 'No location (' + p.gpsErr + ')' : 'No location';
+        else loc = (p.inside ? 'At ' : 'Outside ') + (p.place || 'store') + ', ' + Math.round(p.dist) + ' m (±' + Math.round(p.acc || 0) + ' m)';
+        if (p.dist != null && !p.inside) st.push('Outside the store');
+      }
+      rows.push([tcFmt_(t, 'yyyy-MM-dd'), tcFmt_(t, 'h:mm a'), s ? s.name : String(p.name || ''), p.type === 'out' ? 'Time out' : 'Time in',
+        String(p.where || (p.mode === 'phone' ? 'Own phone' : 'Store tablet')), loc, st.join('; ') || 'OK', tcFmt_(now, 'yyyy-MM-dd h:mm a'), id, String(p.k || ''),
+        p.photo ? 'yes' : '', t]);
+      if (p.photo && String(p.photo).length < 48000) photos.push([id, tcFmt_(t, 'yyyy-MM-dd'), s ? s.name : String(p.name || ''), String(p.photo)]);
+      seen[id] = 1; done.push(id);
+    });
+    if (rows.length) {
+      const r = sh.getLastRow() + 1;
+      sh.getRange(r, 1, rows.length, 1).setNumberFormat('@');
+      sh.getRange(r, 1, rows.length, rows[0].length).setValues(rows);
+    }
+    if (photos.length) { const ph = sheet_(TC_PH, ['Punch ID', 'Date', 'Name', 'Photo']), r = ph.getLastRow() + 1;
+      ph.getRange(r, 2, photos.length, 1).setNumberFormat('@'); ph.getRange(r, 1, photos.length, 4).setValues(photos); }
+    return { ok: true, v: VERSION, t: now, done: done };
+  }
+  if (b.action === 'tcsetup') { // manager only: store locations, photo and location rules
+    if (!tcMgr_(b)) return { ok: false, v: VERSION, auth: true };
+    const st = Object.assign({}, TC_DEF, b.setup || {});
+    const store = sheet_(DATA, ['Key', 'Saved data', 'Updated']), v = store.getDataRange().getValues();
+    let at = 0; for (let i = 1; i < v.length; i++) if (String(v[i][0]) === 'tc:setup') at = i + 1;
+    const row = ['tc:setup', JSON.stringify(st), new Date()];
+    if (at) store.getRange(at, 1, 1, 3).setValues([row]); else store.appendRow(row);
+    return { ok: true, v: VERSION, setup: st };
+  }
+  if (b.action === 'tcroster') { // from the Payroll sync: active employees with their Payroll ID
+    const sh = tcStaffSheet_(), cur = tcStaff_(), byId = {}, byName = {}, used = {}, list = b.staff || [];
+    cur.forEach(function (s) { if (s.id) byId[s.id] = s; else byName[s.name.toLowerCase()] = s; if (s.pin) used[tcPin_(s.pin)] = 1; });
+    const want = {}; let added = 0;
+    const newPin = function () { for (let i = 0; i < 200; i++) { const p = String(1000 + Math.floor(Math.random() * 9000)); if (!used[p]) { used[p] = 1; return p; } } return String(1000 + Math.floor(Math.random() * 9000)); };
+    list.forEach(function (e) {
+      const id = String(e.id || '').trim(), name = String(e.name || '').replace(/\s+/g, ' ').trim(); if (!id || !name) return;
+      want[id] = 1;
+      const s = byId[id] || byName[name.toLowerCase()];
+      if (s) { // keep the PIN and the Active value Carms typed; bring the name and branch up to date
+        const row = [id, name, s.pin || newPin(), String(e.branch || s.branch || ''), String(e.biz || s.biz || ''), s.active ? 'yes' : 'no'];
+        if (s.id !== id || s.name !== name || !s.pin || s.branch !== row[3] || s.biz !== row[4]) sh.getRange(s.row, 1, 1, 6).setValues([row]);
+        byId[id] = s;
+      } else { sh.appendRow([id, name, newPin(), String(e.branch || ''), String(e.biz || ''), 'yes']); added++; }
+    });
+    // Someone no longer active in Payroll: hidden from the clock (rows typed by hand, with no Payroll ID, are left alone).
+    if (b.full) cur.forEach(function (s) { if (s.id && !want[s.id] && s.active) sh.getRange(s.row, 6).setValue('no'); });
+    return { ok: true, v: VERSION, added: added };
+  }
+  return { ok: false, v: VERSION, error: 'unknown action' };
 }
