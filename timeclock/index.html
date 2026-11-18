@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Time Clock</title>
+<meta name="theme-color" content="#1d5c63">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="../icon.svg"><link rel="apple-touch-icon" href="../icon-192.png">
+<style>
+:root{color-scheme:light;--bg:#f3f4ef;--card:#fff;--ink:#1a1a1a;--mute:#5d625b;--line:#d6d9d2;--brand:#1d5c63;--in:#2f6b3a;--out:#a3461f;--warn:#9a6a00;--bad:#b3342b}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+body{min-height:100vh;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+button{font:inherit;cursor:pointer;color:inherit}
+input,select{font:inherit;color:var(--ink);background:#fff;border:1px solid #b9bdb5;border-radius:10px;padding:11px 12px;min-width:0;width:100%}
+.screen{display:none;max-width:1100px;margin:0 auto;padding:16px}
+.screen.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
+.narrow{max-width:440px;margin:0 auto}
+h1{font-size:24px;margin:0 0 6px}h2{font-size:19px;margin:0 0 8px}
+p{margin:0 0 10px}.mute{color:var(--mute);font-size:14px}
+.btn{border:0;border-radius:12px;padding:13px 16px;font-weight:650;background:var(--brand);color:#fff}
+.btn.ghost{background:transparent;color:var(--brand);border:1px solid var(--brand)}
+.btn.plain{background:#e8eae4;color:var(--ink)}
+.btn.small{padding:8px 12px;font-size:14px;border-radius:10px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grow{flex:1}
+.stack{display:grid;gap:12px}
+label.f{display:grid;gap:5px;font-size:14px;font-weight:600;color:#444}
+.err{color:var(--bad);font-weight:600;font-size:14px;min-height:1.2em}
+.clock{font-variant-numeric:tabular-nums;font-weight:750;letter-spacing:-.5px}
+/* mode chooser */
+.pick{display:grid;gap:12px;grid-template-columns:1fr}
+.pick button{text-align:left;background:#fff;border:2px solid var(--line);border-radius:16px;padding:18px}
+.pick button b{display:block;font-size:19px;margin-bottom:4px}
+.pick button:hover{border-color:var(--brand)}
+/* kiosk */
+.khead{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.khead .clock{font-size:clamp(40px,8vw,76px);line-height:1}
+.names{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-top:12px}
+.names button{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 12px;text-align:left;font-weight:650;min-height:74px;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.names button small{font-weight:500;color:var(--mute);font-size:13px}
+.names button.isin{border-left:6px solid var(--in)}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:16px;font-size:13px;color:var(--mute);flex-wrap:wrap}
+/* pin pad */
+.dots{display:flex;gap:14px;justify-content:center;margin:14px 0}
+.dots i{width:18px;height:18px;border-radius:50%;border:2px solid var(--brand)}
+.dots i.f{background:var(--brand)}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:330px;margin:0 auto}
+.pad button{font-size:28px;font-weight:650;padding:16px 0;border-radius:14px;border:1px solid var(--line);background:#fff}
+.pad button.k{font-size:16px;background:#e8eae4}
+/* punch buttons */
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.acts button{border:0;border-radius:18px;padding:26px 10px;font-size:24px;font-weight:800;color:#fff}
+.acts .in{background:var(--in)}.acts .out{background:var(--out)}
+.acts button.dim{opacity:.55}
+.acts button small{display:block;font-size:13px;font-weight:600;opacity:.9;margin-top:4px}
+.last{background:#eef3f1;border-radius:12px;padding:10px 12px;font-size:15px}
+/* done */
+.done{text-align:center;padding:40px 16px}
+.done .big{font-size:clamp(34px,7vw,60px);font-weight:800;margin:8px 0}
+.done.in .big{color:var(--in)}.done.out .big{color:var(--out)}
+.done .ph{width:120px;height:120px;border-radius:50%;object-fit:cover;margin:0 auto 6px;display:block}
+/* camera */
+#cam{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.88);display:none;place-items:center;padding:16px;color:#fff;text-align:center}
+#cam.on{display:grid}
+#cam video{width:min(80vw,340px);height:min(80vw,340px);object-fit:cover;border-radius:50%;transform:scaleX(-1);background:#222}
+#cam .cd{font-size:44px;font-weight:800;margin:10px 0 4px}
+/* phone */
+.ptop{text-align:center;padding:10px 0 4px}
+.ptop .clock{font-size:clamp(52px,16vw,84px);line-height:1.05}
+.status{display:flex;gap:8px;align-items:center;justify-content:center;font-weight:650;margin:8px 0}
+.pill{display:inline-block;border-radius:99px;padding:3px 10px;font-size:13px;font-weight:650;background:#e8eae4}
+.pill.ok{background:#e1efe3;color:#22512b}.pill.warn{background:#fbefd2;color:#6d4b00}.pill.bad{background:#f8dfdc;color:#8a2219}
+.list{display:grid;gap:6px;margin-top:8px}
+.list div{display:flex;justify-content:space-between;gap:10px;padding:9px 12px;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:15px}
+/* manager */
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.3px;color:var(--mute)}
+td img{width:44px;height:44px;border-radius:50%;object-fit:cover;display:block}
+.tablewrap{overflow-x:auto}
+#qr{background:#fff;padding:10px;display:inline-block;border-radius:10px}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#1a1a1a;color:#fff;border-radius:99px;padding:9px 16px;font-size:14px;z-index:60;display:none;max-width:92vw}
+.hide{display:none!important}
+@media (min-width:640px){.pick{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<!-- first visit: which device is this? -->
+<section class="screen" id="sMode">
+  <div class="narrow stack">
+    <div><h1>Time Clock</h1><p class="mute">Employees tap Time in and Time out here. The times go to your Google Sheet, and Payroll fills the time cards from it.</p></div>
+    <div class="pick">
+      <button data-go="kiosk"><b>Store tablet</b><span class="mute">One shared tablet or phone at the store. Each employee taps their name and enters their PIN.</span></button>
+      <button data-go="phone"><b>My own phone</b><span class="mute">For one employee. Times in and out from their own phone, with the store's location checked.</span></button>
+    </div>
+    <button class="btn ghost" data-go="mgr">Owner settings</button>
+  </div>
+</section>
+
+<!-- Google Sheet link -->
+<section class="screen" id="sLink">
+  <form class="narrow card stack" id="fLink" autocomplete="off">
+    <h1>Connect to the Google Sheet</h1>
+    <p class="mute">Ask the owner for the Time Clock link, or paste the Google Sheet link (the one ending in /exec) used by the other bakery websites.</p>
+    <label class="f">Google Sheet link<input id="iLink" placeholder="https://script.google.com/macros/s/…/exec"></label>
+    <div class="err" id="eLink"></div>
+    <button class="btn" type="submit">Connect</button>
+  </form>
+</section>
+
+<!-- kiosk: name grid -->
+<section class="screen" id="sKiosk">
+  <div class="khead">
+    <div><div class="mute" id="kPlace">Store tablet</div><div class="clock" id="kClock">--:--</div><div id="kDate" class="mute"></div></div>
+    <div style="min-width:220px;flex:0 1 320px"><input id="kSearch" placeholder="Find your name" autocomplete="off" inputmode="search"></div>
+  </div>
+  <p class="mute">Tap your name to time in or out. Going on break? Time out, then time in again when you're back.</p>
+  <div class="names" id="kNames"></div>
+  <div class="foot"><span id="kSync"></span><span class="row"><button class="btn small plain" id="kFull">Full screen</button><button class="btn small plain" data-go="mgr">Owner</button></span></div>
+</section>
+
+<!-- kiosk: PIN -->
+<section class="screen" id="sPin">
+  <div class="narrow card" style="text-align:center">
+    <h2 id="pName"></h2>
+    <p class="mute">Enter your 4-digit PIN</p>
+    <div class="dots" id="pDots"><i></i><i></i><i></i><i></i></div>
+    <div class="err" id="pErr"></div>
+    <div class="pad" id="pPad"></div>
+  </div>
+</section>
+
+<!-- kiosk: choose in or out -->
+<section class="screen" id="sAct">
+  <div class="narrow card">
+    <h2 id="aName"></h2>
+    <div class="last" id="aLast">Checking your last time…</div>
+    <div class="acts" id="aActs">
+      <button class="in" data-type="in">Time in<small id="aInHint"></small></button>
+      <button class="out" data-type="out">Time out<small id="aOutHint"></small></button>
+    </div>
+    <p style="margin-top:14px;text-align:center"><button class="btn small plain" id="aCancel">Cancel</button></p>
+  </div>
+</section>
+
+<!-- confirmation -->
+<section class="screen" id="sDone">
+  <div class="narrow card done" id="dBox">
+    <img class="ph hide" id="dPh" alt="">
+    <div class="mute" id="dWho"></div>
+    <div class="big" id="dWhat"></div>
+    <div id="dWhen" class="clock" style="font-size:28px"></div>
+    <p class="mute" id="dNote" style="margin-top:10px"></p>
+    <button class="btn" id="dOk" style="margin-top:8px">OK</button>
+  </div>
+</section>
+
+<!-- phone: who are you -->
+<section class="screen" id="sWho">
+  <div class="narrow stack">
+    <div><h1>Who are you?</h1><p class="mute">Choose your name, then enter the PIN the owner gave you. This phone remembers you.</p></div>
+    <input id="wSearch" placeholder="Find your name" autocomplete="off">
+    <select id="wSel" size="8" style="min-height:240px"></select>
+    <label class="f">PIN<input id="wPin" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></label>
+    <div class="err" id="wErr"></div>
+    <button class="btn" id="wGo">Continue</button>
+    <button class="btn ghost small" data-go="choose">This is not my phone</button>
+  </div>
+</section>
+
+<!-- phone: home -->
+<section class="screen" id="sPhone">
+  <div class="narrow">
+    <div class="ptop">
+      <div class="mute" id="hName"></div>
+      <div class="clock" id="hClock">--:--</div>
+      <div class="mute" id="hDate"></div>
+      <div class="status" id="hState"></div>
+      <div id="hGps" class="mute" style="font-size:13px"></div>
+    </div>
+    <div class="acts" id="hActs">
+      <button class="in" data-type="in">Time in</button>
+      <button class="out" data-type="out">Time out</button>
+    </div>
+    <h2 style="margin-top:22px">Recent</h2>
+    <div class="list" id="hList"></div>
+    <div class="foot"><span id="hSync"></span><span class="row"><button class="btn small plain" id="hSwitch">Not you?</button><button class="btn small plain" data-go="mgr">Owner</button></span></div>
+  </div>
+</section>
+
+<!-- owner -->
+<section class="screen" id="sMgr">
+  <div class="narrow stack" id="mLogin">
+    <div><h1>Owner settings</h1><p class="mute">Log in with your name and PIN from the "Staff logins" tab (Manager: yes).</p></div>
+    <label class="f">Your name<input id="mName" autocomplete="username"></label>
+    <label class="f">PIN<input id="mPin" type="password" inputmode="numeric" autocomplete="current-password"></label>
+    <div id="mLinkBox" class="hide"><label class="f">Google Sheet link<input id="mLink" placeholder="https://script.google.com/macros/s/…/exec"></label></div>
+    <div class="err" id="mErr"></div>
+    <div class="row"><button class="btn grow" id="mGo">Log in</button><button class="btn plain" id="mBack">Back</button></div>
+  </div>
+  <div class="stack hide" id="mPanel" style="max-width:820px;margin:0 auto">
+    <div class="row"><h1 class="grow">Owner settings</h1><button class="btn plain small" id="mClose">Done</button></div>
+
+    <div class="card stack">
+      <h2>This device</h2>
+      <p class="mute" id="mDev"></p>
+      <div class="row">
+        <button class="btn small" id="mAsKiosk">Use as store tablet</button>
+        <button class="btn small ghost" id="mAsPhone">Use as an employee phone</button>
+      </div>
+      <div class="stack" id="mKioskBox">
+        <label class="f">Name of this tablet (shows on each punch)<input id="mKName" placeholder="Main store tablet"></label>
+        <label class="f">Show employees from<select id="mKBranch"></select></label>
+        <div class="row"><button class="btn small" id="mKSave">Save tablet settings</button></div>
+      </div>
+    </div>
+
+    <div class="card stack">
+      <h2>Store locations</h2>
+      <p class="mute">Employee phones are checked against these. Stand inside the store and tap "Add this spot".</p>
+      <div class="list" id="mPlaces"></div>
+      <div class="row"><input id="mPlName" class="grow" placeholder="Store name, e.g. Main Branch" style="flex:2 1 180px"><input id="mPlR" type="number" min="30" step="10" value="100" style="flex:1 1 90px" title="Radius in meters"><button class="btn small" id="mPlAdd">Add this spot</button></div>
+      <label class="f">When an employee phone is outside the store
+        <select id="mGps"><option value="warn">Allow, but mark it "Outside the store"</option><option value="block">Don't allow the punch</option><option value="off">Don't check location</option></select></label>
+      <label class="row" style="font-weight:600"><input type="checkbox" id="mPhK" style="width:auto"> Take a photo at each punch on the store tablet</label>
+      <label class="row" style="font-weight:600"><input type="checkbox" id="mPhP" style="width:auto"> Take a selfie at each punch on employee phones</label>
+      <div class="row"><button class="btn small" id="mSetSave">Save</button><span class="mute" id="mSetMsg"></span></div>
+    </div>
+
+    <div class="card stack">
+      <h2>Link for employee phones</h2>
+      <p class="mute">Send this link to employees (Messenger or SMS), or let them scan the code. It connects their phone to your Sheet. Their PINs are in the "Time clock staff" tab of the Sheet.</p>
+      <input id="mPLink" readonly onclick="this.select()">
+      <div class="row"><button class="btn small" id="mCopy">Copy link</button><button class="btn small ghost" id="mShare">Share</button><button class="btn small ghost" id="mQrBtn">Show QR code</button></div>
+      <div id="qr" class="hide"></div>
+    </div>
+
+    <div class="card stack">
+      <div class="row"><h2 class="grow">Punches</h2><input type="date" id="mDay" style="width:auto"><button class="btn small" id="mLoad">Show</button></div>
+      <div class="tablewrap"><table><thead><tr><th></th><th>Name</th><th>In / Out</th><th>Time</th><th>Where</th><th>Status</th></tr></thead><tbody id="mRows"></tbody></table></div>
+      <p class="mute" id="mRowsMsg"></p>
+    </div>
+  </div>
+</section>
+
+<div id="cam"><div><video id="camV" autoplay playsinline muted></video><div class="cd" id="camCd"></div><div id="camMsg">Look at the camera</div>
+  <p><button class="btn plain small" id="camSkip" style="margin-top:12px">Skip photo</button></p></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+'use strict';
+var TZ = 'Asia/Manila', $ = function (id) { return document.getElementById(id); };
+var LS = {
+  get: function (k, d) { try { var v = localStorage.getItem('tc.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set: function (k, v) { try { if (v == null) localStorage.removeItem('tc.' + k); else localStorage.setItem('tc.' + k, JSON.stringify(v)); } catch (e) {} }
+};
+var SHEET_RE = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+
+/* ---------- saved state ---------- */
+var st = {
+  sheet: LS.get('sheet', ''),
+  mode: LS.get('mode', ''),               // 'kiosk' | 'phone'
+  kiosk: LS.get('kiosk', { name: '', branch: '' }),
+  me: LS.get('me', null),                 // phone: {k, name, h}
+  roster: LS.get('roster', { staff: [], setup: null, at: 0 }),
+  off: LS.get('off', 0),                  // server time minus this device's time
+  queue: LS.get('queue', []),
+  recent: LS.get('recent', {})            // k -> [{type, t}]
+};
+// a link like …/timeclock/#m=phone&s=<sheet link> sets this phone up
+(function () {
+  var h = location.hash.slice(1); if (!h) return;
+  var q = {}; h.split('&').forEach(function (x) { var i = x.indexOf('='); if (i > 0) q[x.slice(0, i)] = decodeURIComponent(x.slice(i + 1)); });
+  if (q.s && SHEET_RE.test(q.s)) { st.sheet = q.s; LS.set('sheet', q.s); }
+  if (q.m === 'phone' && st.mode !== 'kiosk') { st.mode = 'phone'; LS.set('mode', 'phone'); }
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+})();
+if (!st.sheet) { // same website: reuse the link the other bakery pages saved on this device
+  try { var b = localStorage.getItem('bakery.sheet'); if (b && SHEET_RE.test(b)) { st.sheet = b; LS.set('sheet', b); } } catch (e) {}
+}
+
+/* ---------- helpers ---------- */
+var now = function () { return Date.now() + (st.off || 0); };
+var fTime = new Intl.DateTimeFormat('en-PH', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+var fSec = new Intl.DateTimeFormat('en-PH', { timeZone: TZ, hour: 'numeric', minute: '2-digit', second: '2-digit' });
+var fDate = new Intl.DateTimeFormat('en-PH', { timeZone: TZ, weekday: 'long', month: 'long', day: 'numeric' });
+var fDay = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+var dayKey = function (ms) { return fDay.format(new Date(ms)); };
+var tStr = function (ms) { return fTime.format(new Date(ms)); };
+function whenStr(ms) {
+  var d = dayKey(ms), t = dayKey(now()), y = dayKey(now() - 86400000);
+  return tStr(ms) + (d === t ? ' today' : d === y ? ' yesterday' : ' on ' + new Intl.DateTimeFormat('en-PH', { timeZone: TZ, month: 'short', day: 'numeric' }).format(new Date(ms)));
+}
+function pinNorm(p) { p = String(p || '').trim(); return /^\d+$/.test(p) ? String(Number(p)) : p; }
+function hash(key, pin) { var s = key + '|' + pinNorm(pin), h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function toast(msg, ms) { var t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { t.style.display = 'none'; }, ms || 3000); }
+function setup() { return Object.assign({ places: [], photo: { kiosk: true, phone: true }, gps: 'warn' }, st.roster.setup || {}); }
+function show(id) { document.querySelectorAll('.screen').forEach(function (s) { s.classList.toggle('on', s.id === id); }); window.scrollTo(0, 0); }
+function timeout(p, ms) { return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout')); }, ms); })]); }
+function api(params, ms) {
+  var q = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+  return timeout(fetch(st.sheet + '?' + q + '&_=' + Date.now()).then(function (r) { return r.json(); }), ms || 20000);
+}
+function post(body, ms) {
+  return timeout(fetch(st.sheet, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }), ms || 30000);
+}
+
+/* ---------- staff list from the Sheet ---------- */
+function loadRoster() {
+  if (!st.sheet || !navigator.onLine) return Promise.resolve(false);
+  var t0 = Date.now();
+  return api({ action: 'tcroster' }).then(function (j) {
+    if (!j || !j.ok) { if (j && !(j.v >= 8)) syncMsg('The Google Sheet script needs the Time Clock update (version 8).'); return false; }
+    var t1 = Date.now();
+    st.off = j.t ? Math.round(j.t - (t0 + t1) / 2) : 0; LS.set('off', st.off);
+    st.roster = { staff: j.staff || [], setup: j.setup || null, at: Date.now() }; LS.set('roster', st.roster);
+    render(); return true;
+  }).catch(function () { return false; });
+}
+function staffBy(k) { return st.roster.staff.filter(function (s) { return s.k === k; })[0]; }
+
+/* ---------- recent punches (this device + the Sheet) ---------- */
+function addRecent(k, type, t) {
+  var r = (st.recent[k] || []).filter(function (x) { return x.t > now() - 3 * 86400000 && Math.abs(x.t - t) > 1000; });
+  r.push({ type: type, t: t }); r.sort(function (a, b) { return a.t - b.t; }); st.recent[k] = r.slice(-12); LS.set('recent', st.recent);
+}
+function lastOf(k) { var r = st.recent[k] || []; return r.length ? r[r.length - 1] : null; }
+function fetchMine(k, h) {
+  if (!navigator.onLine) return Promise.resolve();
+  return api({ action: 'tcmine', k: k, h: h }, 6000).then(function (j) {
+    if (j && j.ok) (j.punches || []).forEach(function (p) { if (p.t && !/Wrong PIN/.test(p.status)) addRecent(k, p.type, p.t); });
+  }).catch(function () {});
+}
+// Suggest the next punch: Time out if the last one was Time in less than 18 hours ago.
+function suggest(k) { var l = lastOf(k); return l && l.type === 'in' && now() - l.t < 18 * 3600000 ? 'out' : 'in'; }
+
+/* ---------- sending punches ---------- */
+function syncMsg(m) { ['kSync', 'hSync'].forEach(function (id) { if ($(id)) $(id).textContent = m; }); }
+function queueMsg() {
+  var n = st.queue.length;
+  syncMsg(!st.sheet ? 'Not connected to the Google Sheet' : n ? n + ' punch' + (n > 1 ? 'es' : '') + ' waiting to send' + (navigator.onLine ? '…' : ' (no internet, kept on this device)') : 'All punches sent');
+}
+var pushing = false;
+function push() {
+  queueMsg();
+  if (pushing || !st.queue.length || !st.sheet || !navigator.onLine) return Promise.resolve();
+  pushing = true;
+  var batch = st.queue.slice(0, 4);
+  return post({ action: 'tcpunch', punches: batch }).then(function (j) {
+    if (!j || !j.ok) throw new Error((j && j.error) || 'not saved');
+    var done = {}; (j.done || []).forEach(function (id) { done[id] = 1; });
+    st.queue = st.queue.filter(function (p) { return !done[p.id]; }); LS.set('queue', st.queue);
+    pushing = false; queueMsg();
+    if (st.queue.length && Object.keys(done).length) return push();
+  }).catch(function () { pushing = false; queueMsg(); });
+}
+setInterval(push, 30000);
+window.addEventListener('online', function () { push(); loadRoster(); });
+window.addEventListener('offline', queueMsg);
+
+/* ---------- camera ---------- */
+function snap(seconds) {
+  return new Promise(function (resolve) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return resolve(null);
+    var ov = $('cam'), v = $('camV'), stream = null, timer = null, finished = false;
+    function end(photo) {
+      if (finished) return; finished = true; clearInterval(timer);
+      if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      v.srcObject = null; ov.classList.remove('on'); resolve(photo);
+    }
+    $('camSkip').onclick = function () { end(null); };
+    $('camCd').textContent = ''; $('camMsg').textContent = 'Opening the camera…'; ov.classList.add('on');
+    timeout(navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } }, audio: false }), 10000).then(function (s) {
+      stream = s; v.srcObject = s; $('camMsg').textContent = 'Look at the camera';
+      var n = seconds; $('camCd').textContent = n;
+      timer = setInterval(function () {
+        n--; if (n > 0) { $('camCd').textContent = n; return; }
+        try {
+          var c = document.createElement('canvas'), S = 200, w = v.videoWidth || 480, h = v.videoHeight || 480, m = Math.min(w, h);
+          c.width = S; c.height = S; var g = c.getContext('2d'); g.translate(S, 0); g.scale(-1, 1);
+          g.drawImage(v, (w - m) / 2, (h - m) / 2, m, m, 0, 0, S, S);
+          end(c.toDataURL('image/jpeg', 0.6));
+        } catch (e) { end(null); }
+      }, 1000);
+    }).catch(function () { end(null); });
+  });
+}
+
+/* ---------- location (employee phones) ---------- */
+var fix = null, watchId = null;
+function dist(a, b, c, d) { var R = 6371000, r = Math.PI / 180, x = Math.sin((c - a) * r / 2), y = Math.sin((d - b) * r / 2); return 2 * R * Math.asin(Math.sqrt(x * x + Math.cos(a * r) * Math.cos(c * r) * y * y)); }
+function nearest(p) {
+  var best = null;
+  setup().places.forEach(function (pl) {
+    var d = dist(p.lat, p.lng, pl.lat, pl.lng);
+    if (!best || d < best.dist) best = { place: pl.name, dist: d, inside: d - Math.min(p.acc || 0, 150) <= (pl.r || 100) };
+  });
+  return best;
+}
+function watchGps() {
+  if (watchId != null || !navigator.geolocation || setup().gps === 'off') return;
+  watchId = navigator.geolocation.watchPosition(function (p) { fix = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() }; gpsLine(); },
+    function (e) { fix = { err: e.code === 1 ? 'location not allowed' : 'location not found', at: Date.now() }; gpsLine(); }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 });
+}
+function stopGps() { if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
+function gpsLine() {
+  var el = $('hGps'); if (!el) return;
+  var S = setup();
+  if (S.gps === 'off') { el.textContent = ''; return; }
+  if (!S.places.length) { el.textContent = 'The owner has not saved the store location yet.'; return; }
+  if (!fix) { el.textContent = 'Finding your location…'; return; }
+  if (fix.err) { el.innerHTML = '<span class="pill bad">' + esc(fix.err) + '</span> Allow location for this website in your browser settings.'; return; }
+  var n = nearest(fix);
+  el.innerHTML = n.inside ? '<span class="pill ok">At ' + esc(n.place) + '</span>' : '<span class="pill warn">' + Math.round(n.dist) + ' m from ' + esc(n.place) + '</span>';
+}
+function getFix() {
+  if (fix && !fix.err && Date.now() - fix.at < 60000) return Promise.resolve(fix);
+  return new Promise(function (res) {
+    if (!navigator.geolocation) return res({ err: 'no location on this phone' });
+    navigator.geolocation.getCurrentPosition(function (p) { fix = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() }; res(fix); },
+      function (e) { res({ err: e.code === 1 ? 'location not allowed' : 'location not found' }); }, { enableHighAccuracy: true, maximumAge: 20000, timeout: 15000 });
+  });
+}
+
+/* ---------- one punch ---------- */
+var busy = false;
+function punch(person, type) {
+  if (busy) return; busy = true;
+  var mode = st.mode, S = setup(), l = lastOf(person.k);
+  var again = l && l.type === type && now() - l.t < 10 * 60000;
+  if (again && !confirm('You already did ' + (type === 'in' ? 'Time in' : 'Time out') + ' at ' + tStr(l.t) + '. Do it again?')) { busy = false; return; }
+  var p = { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), k: person.k, name: person.name, h: person.h, type: type, mode: mode,
+    where: mode === 'kiosk' ? (st.kiosk.name || 'Store tablet') : 'Own phone' };
+  var step = Promise.resolve(true);
+  if (mode === 'phone' && S.gps !== 'off' && S.places.length) {
+    step = getFix().then(function (f) {
+      if (f.err) { p.gpsErr = f.err; if (S.gps === 'block') { alert('Your location is needed to time in or out. Turn on location and allow it for this website.'); return false; } return true; }
+      var n = nearest(f); p.lat = +f.lat.toFixed(6); p.lng = +f.lng.toFixed(6); p.acc = Math.round(f.acc); p.dist = Math.round(n.dist); p.place = n.place; p.inside = n.inside;
+      if (!n.inside && S.gps === 'block') { alert('You are ' + Math.round(n.dist) + ' m from ' + n.place + '. You can only time in or out at the store.'); return false; }
+      if (!n.inside) return confirm('You are ' + Math.round(n.dist) + ' m from ' + n.place + '. Send anyway? It will be marked "Outside the store" for the owner.');
+      return true;
+    });
+  }
+  step.then(function (ok) {
+    if (!ok) { busy = false; return null; }
+    var wantPhoto = mode === 'kiosk' ? S.photo.kiosk !== false : S.photo.phone !== false;
+    return (wantPhoto ? snap(mode === 'kiosk' ? 2 : 3) : Promise.resolve(null)).then(function (photo) {
+      p.t = now(); if (photo) p.photo = photo;
+      st.queue.push(p); LS.set('queue', st.queue); addRecent(p.k, p.type, p.t);
+      busy = false; doneScreen(p); push();
+      return p;
+    });
+  }).catch(function () { busy = false; });
+}
+function doneScreen(p) {
+  var box = $('dBox'); box.className = 'narrow card done ' + p.type;
+  $('dPh').classList.toggle('hide', !p.photo); if (p.photo) $('dPh').src = p.photo;
+  var hr = +new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hour12: false }).format(new Date(p.t)) % 24;
+  var hello = p.type === 'in' ? (hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening') : 'Thank you';
+  $('dWho').textContent = hello + ', ' + firstName(p.name) + '!';
+  $('dWhat').textContent = p.type === 'in' ? 'Timed in' : 'Timed out';
+  $('dWhen').textContent = fTime.format(new Date(p.t));
+  var notes = [];
+  if (p.inside === false) notes.push('Marked "Outside the store" (' + p.dist + ' m away).');
+  if (p.gpsErr) notes.push('No location: ' + p.gpsErr + '.');
+  if (!navigator.onLine) notes.push('No internet: saved on this device and sent when it connects.');
+  $('dNote').textContent = notes.join(' ');
+  show('sDone');
+  clearTimeout(doneScreen.h);
+  var back = function () { clearTimeout(doneScreen.h); if (st.mode === 'kiosk') kioskHome(); else phoneHome(); };
+  $('dOk').onclick = back;
+  doneScreen.h = setTimeout(back, st.mode === 'kiosk' ? 4000 : 6000);
+}
+function firstName(n) { n = String(n || ''); if (n.indexOf(',') >= 0) n = n.split(',')[1]; return (n.trim().split(/\s+/)[0] || n).replace(/^./, function (c) { return c.toUpperCase(); }); }
+
+/* ---------- kiosk ---------- */
+function kioskStaff() {
+  var f = st.kiosk.branch || '', m = /^(biz|br):(.*)$/.exec(f), key = m ? (m[1] === 'biz' ? 'biz' : 'branch') : 'branch', val = (m ? m[2] : f).toLowerCase();
+  return st.roster.staff.filter(function (s) { return !val || (s[key] || '').toLowerCase() === val; });
+}
+function renderKiosk() {
+  $('kPlace').textContent = st.kiosk.name || 'Store tablet';
+  var q = $('kSearch').value.trim().toLowerCase(), list = kioskStaff().filter(function (s) { return !q || s.name.toLowerCase().indexOf(q) >= 0; });
+  var el = $('kNames');
+  if (!st.roster.staff.length) { el.innerHTML = '<div class="card" style="grid-column:1/-1"><b>No employees yet.</b><p class="mute" style="margin-top:6px">The employee list comes from Payroll through the Google Sheet ("Time clock staff" tab). It fills in after the next Payroll sync, or the owner can type names and PINs there.</p></div>'; return; }
+  el.innerHTML = list.map(function (s) {
+    var l = lastOf(s.k), isin = l && l.type === 'in' && now() - l.t < 18 * 3600000;
+    return '<button data-k="' + esc(s.k) + '" class="' + (isin ? 'isin' : '') + '">' + esc(s.name) + '<small>' + (isin ? 'In since ' + tStr(l.t) : l && dayKey(l.t) === dayKey(now()) ? 'Out at ' + tStr(l.t) : '&nbsp;') + '</small></button>';
+  }).join('') || '<p class="mute">No name matches.</p>';
+}
+function kioskHome() { $('kSearch').value = ''; renderKiosk(); show('sKiosk'); queueMsg(); }
+$('kSearch').addEventListener('input', renderKiosk);
+$('kNames').addEventListener('click', function (e) { var b = e.target.closest('button[data-k]'); if (b) pinScreen(staffBy(b.getAttribute('data-k'))); });
+$('kFull').onclick = function () { var d = document.documentElement; if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().catch(function () {}); else if (document.exitFullscreen) document.exitFullscreen().catch(function () {}); };
+
+var pinFor = null, pinVal = '', pinTimer = null;
+function pinScreen(s) {
+  if (!s) return; clearTimeout(pinWrong); pinFor = s; pinVal = ''; $('pName').textContent = s.name; $('pErr').textContent = ''; drawDots(); show('sPin'); idle();
+}
+function idle() { clearTimeout(pinTimer); pinTimer = setTimeout(function () { if ($('sPin').classList.contains('on') || $('sAct').classList.contains('on')) kioskHome(); }, 30000); }
+function drawDots() { var d = $('pDots').children; for (var i = 0; i < d.length; i++) d[i].className = i < pinVal.length ? 'f' : ''; }
+$('pPad').innerHTML = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Back', '0', 'OK'].map(function (k) { return '<button class="' + (k.length > 1 ? 'k' : '') + '" data-k="' + k + '">' + k + '</button>'; }).join('');
+$('pPad').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return; idle();
+  var k = b.getAttribute('data-k');
+  if (k === 'Back') { if (!pinVal) { kioskHome(); return; } pinVal = pinVal.slice(0, -1); }
+  else if (k !== 'OK' && pinVal.length < 8) pinVal += k;
+  $('pErr').textContent = ''; drawDots(); clearTimeout(pinWrong);
+  if (hash(pinFor.k, pinVal) === pinFor.h) { actScreen(pinFor); return; }
+  var wrong = function () { $('pErr').textContent = 'Wrong PIN. Try again.'; pinVal = ''; drawDots(); };
+  if (k === 'OK' || pinVal.length >= 8) wrong();
+  else if (pinVal.length === 4) pinWrong = setTimeout(wrong, 1500); // PINs are 4 digits unless the owner typed a longer one
+});
+var pinWrong = null;
+document.addEventListener('keydown', function (e) {
+  if (!$('sPin').classList.contains('on')) return;
+  var b = /^\d$/.test(e.key) ? e.key : e.key === 'Backspace' ? 'Back' : e.key === 'Enter' ? 'OK' : null;
+  if (b) { var el = $('pPad').querySelector('[data-k="' + b + '"]'); if (el) el.click(); }
+});
+function actScreen(s) {
+  $('aName').textContent = s.name; show('sAct'); idle();
+  var paint = function () {
+    var l = lastOf(s.k), sug = suggest(s.k);
+    $('aLast').textContent = l ? 'Last: ' + (l.type === 'in' ? 'Time in' : 'Time out') + ' at ' + whenStr(l.t) : 'No punches in the last 3 days.';
+    $('aActs').children[0].classList.toggle('dim', sug !== 'in'); $('aActs').children[1].classList.toggle('dim', sug !== 'out');
+  };
+  paint(); fetchMine(s.k, s.h).then(function () { if ($('sAct').classList.contains('on') && $('aName').textContent === s.name) paint(); });
+  $('aActs').onclick = function (e) { var b = e.target.closest('button[data-type]'); if (b) { clearTimeout(pinTimer); punch(s, b.getAttribute('data-type')); } };
+}
+$('aCancel').onclick = kioskHome;
+
+/* ---------- employee phone ---------- */
+function renderWho() {
+  var q = $('wSearch').value.trim().toLowerCase(), sel = $('wSel'), cur = sel.value;
+  sel.innerHTML = st.roster.staff.filter(function (s) { return !q || s.name.toLowerCase().indexOf(q) >= 0; })
+    .map(function (s) { return '<option value="' + esc(s.k) + '">' + esc(s.name) + '</option>'; }).join('');
+  if (cur) sel.value = cur;
+  if (!st.roster.staff.length) $('wErr').textContent = navigator.onLine ? 'Loading the employee list…' : 'Connect to the internet once to load the employee list.';
+}
+$('wSearch').addEventListener('input', renderWho);
+$('wGo').onclick = function () {
+  var s = staffBy($('wSel').value), pin = $('wPin').value;
+  if (!s) { $('wErr').textContent = 'Choose your name first.'; return; }
+  if (hash(s.k, pin) !== s.h) { $('wErr').textContent = 'Wrong PIN. Ask the owner for your PIN.'; return; }
+  st.me = { k: s.k, name: s.name, h: s.h }; LS.set('me', st.me); $('wPin').value = ''; phoneHome();
+};
+function renderPhone() {
+  if (!st.me) return;
+  var s = staffBy(st.me.k);
+  if (s && s.h !== st.me.h) { st.me = null; LS.set('me', null); toast('Your PIN was changed. Log in again.'); show('sWho'); renderWho(); return; }
+  $('hName').textContent = st.me.name;
+  var l = lastOf(st.me.k), sug = suggest(st.me.k);
+  $('hState').innerHTML = sug === 'out' ? '<span class="pill ok">Timed in since ' + esc(whenStr(l.t)) + '</span>' : l ? '<span class="pill">Timed out at ' + esc(whenStr(l.t)) + '</span>' : '<span class="pill">Not timed in</span>';
+  $('hActs').children[0].classList.toggle('dim', sug !== 'in'); $('hActs').children[1].classList.toggle('dim', sug !== 'out');
+  var r = (st.recent[st.me.k] || []).slice().reverse();
+  $('hList').innerHTML = r.map(function (x) { return '<div><span>' + (x.type === 'in' ? 'Time in' : 'Time out') + '</span><span>' + esc(whenStr(x.t)) + '</span></div>'; }).join('') || '<p class="mute">No punches yet.</p>';
+  gpsLine();
+}
+function phoneHome() {
+  if (!st.me) { show('sWho'); renderWho(); return; }
+  renderPhone(); show('sPhone'); queueMsg(); watchGps();
+  fetchMine(st.me.k, st.me.h).then(renderPhone);
+}
+$('hActs').addEventListener('click', function (e) { var b = e.target.closest('button[data-type]'); if (b && st.me) punch(st.me, b.getAttribute('data-type')); });
+$('hSwitch').onclick = function () { if (confirm('Log out ' + st.me.name + ' on this phone?')) { st.me = null; LS.set('me', null); show('sWho'); renderWho(); } };
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) stopGps();
+  else { if (st.mode === 'phone' && $('sPhone').classList.contains('on')) { watchGps(); fetchMine(st.me.k, st.me.h).then(renderPhone); } loadRoster(); push(); }
+});
+
+/* ---------- owner ---------- */
+var mgr = null, mgrBack = null;
+function mgrOpen() {
+  mgrBack = st.mode; show('sMgr');
+  $('mLogin').classList.toggle('hide', !!mgr); $('mPanel').classList.toggle('hide', !mgr);
+  $('mLinkBox').classList.toggle('hide', !!st.sheet);
+  if (mgr) mgrPaint(); else $('mName').focus();
+}
+$('mBack').onclick = function () { start(); };
+$('mGo').onclick = function () {
+  var name = $('mName').value.trim(), pin = $('mPin').value.trim(), link = $('mLink').value.trim();
+  if (link) { if (!SHEET_RE.test(link)) { $('mErr').textContent = 'The Google Sheet link should end with /exec.'; return; } st.sheet = link; LS.set('sheet', link); }
+  if (!st.sheet) { $('mLinkBox').classList.remove('hide'); $('mErr').textContent = 'Paste the Google Sheet link first.'; return; }
+  if (!navigator.onLine) { $('mErr').textContent = 'Connect to the internet to log in.'; return; }
+  $('mErr').textContent = 'Checking…';
+  api({ action: 'login', site: 'timeclock', name: name, pin: pin }).then(function (j) {
+    if (!(j.v >= 8)) { $('mErr').textContent = 'Your Google Sheet script is an older version. Paste the new script (version 8) and deploy a new version first.'; return; }
+    if (j.setup) { $('mErr').textContent = 'No logins yet. Add yourself in the "Staff logins" tab (Name, PIN, Sites: all, Manager: yes).'; return; }
+    if (!j.ok) { $('mErr').textContent = j.locked ? 'Too many wrong tries. Wait 10 minutes.' : j.site ? 'You don\'t have access to the time clock.' : 'Wrong name or PIN.'; return; }
+    if (!j.manager) { $('mErr').textContent = 'Only a manager can open these settings.'; return; }
+    mgr = { name: name, pin: pin }; $('mErr').textContent = ''; $('mPin').value = '';
+    loadRoster().then(function () { mgrOpen(); });
+  }).catch(function () { $('mErr').textContent = 'Could not reach the Google Sheet. Check the link and the internet.'; });
+};
+$('mClose').onclick = function () { mgr = null; start(); };
+function mgrPaint() {
+  var S = setup();
+  $('mDev').textContent = st.mode === 'kiosk' ? 'This device is the store tablet.' : st.mode === 'phone' ? 'This device is an employee phone' + (st.me ? ' (' + st.me.name + ').' : '.') : 'This device is not set up yet.';
+  $('mKioskBox').classList.toggle('hide', st.mode !== 'kiosk');
+  $('mKName').value = st.kiosk.name || '';
+  var br = {}, bz = {}; st.roster.staff.forEach(function (s) { if (s.branch) br[s.branch] = 1; if (s.biz) bz[s.biz] = 1; });
+  $('mKBranch').innerHTML = '<option value="">Everyone</option>' +
+    Object.keys(bz).sort().map(function (b) { return '<option value="biz:' + esc(b) + '">' + esc(b.charAt(0).toUpperCase() + b.slice(1)) + ' staff</option>'; }).join('') +
+    Object.keys(br).sort().map(function (b) { return '<option value="br:' + esc(b) + '">Branch: ' + esc(b) + '</option>'; }).join('');
+  $('mKBranch').value = st.kiosk.branch || '';
+  $('mGps').value = S.gps || 'warn'; $('mPhK').checked = S.photo.kiosk !== false; $('mPhP').checked = S.photo.phone !== false;
+  mgrPlaces = (S.places || []).slice(); paintPlaces();
+  $('mPLink').value = location.origin + location.pathname + '#m=phone&s=' + encodeURIComponent(st.sheet);
+  if (!$('mDay').value) $('mDay').value = dayKey(now());
+}
+var mgrPlaces = [];
+function paintPlaces() {
+  $('mPlaces').innerHTML = mgrPlaces.map(function (p, i) { return '<div><span><b>' + esc(p.name) + '</b> · within ' + p.r + ' m <span class="mute">(' + p.lat.toFixed(5) + ', ' + p.lng.toFixed(5) + ')</span></span><button class="btn small plain" data-del="' + i + '">Remove</button></div>'; }).join('') || '<p class="mute">No store location saved. Phones are not checked until you add one.</p>';
+}
+$('mPlaces').addEventListener('click', function (e) { var b = e.target.closest('[data-del]'); if (b) { mgrPlaces.splice(+b.getAttribute('data-del'), 1); paintPlaces(); $('mSetMsg').textContent = 'Tap Save to keep this change.'; } });
+$('mPlAdd').onclick = function () {
+  var name = $('mPlName').value.trim() || 'Store', r = Math.max(30, +$('mPlR').value || 100);
+  if (!navigator.geolocation) { toast('This device cannot find its location.'); return; }
+  $('mSetMsg').textContent = 'Finding this spot…';
+  navigator.geolocation.getCurrentPosition(function (p) {
+    mgrPlaces.push({ name: name, lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), r: r }); paintPlaces();
+    $('mSetMsg').textContent = 'Added (accuracy ±' + Math.round(p.coords.accuracy) + ' m). Tap Save to keep it.'; $('mPlName').value = '';
+  }, function (e) { $('mSetMsg').textContent = e.code === 1 ? 'Location is not allowed for this website. Allow it in the browser settings.' : 'Could not find the location. Try again near a window.'; },
+  { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+};
+$('mSetSave').onclick = function () {
+  var S = { places: mgrPlaces, gps: $('mGps').value, photo: { kiosk: $('mPhK').checked, phone: $('mPhP').checked } };
+  $('mSetMsg').textContent = 'Saving…';
+  post({ action: 'tcsetup', name: mgr.name, pin: mgr.pin, setup: S }).then(function (j) {
+    if (!j.ok) { $('mSetMsg').textContent = j.auth ? 'Log in again.' : 'Not saved.'; return; }
+    st.roster.setup = j.setup; LS.set('roster', st.roster); $('mSetMsg').textContent = 'Saved. Every tablet and phone picks it up within a few minutes.';
+  }).catch(function () { $('mSetMsg').textContent = 'Could not reach the Google Sheet.'; });
+};
+$('mAsKiosk').onclick = function () { st.mode = 'kiosk'; LS.set('mode', 'kiosk'); st.me = null; LS.set('me', null); mgrPaint(); toast('This device is now the store tablet.'); };
+$('mAsPhone').onclick = function () { st.mode = 'phone'; LS.set('mode', 'phone'); mgrPaint(); toast('This device is now an employee phone.'); };
+$('mKSave').onclick = function () { st.kiosk = { name: $('mKName').value.trim(), branch: $('mKBranch').value }; LS.set('kiosk', st.kiosk); toast('Tablet settings saved.'); };
+$('mCopy').onclick = function () { var i = $('mPLink'); i.select(); (navigator.clipboard ? navigator.clipboard.writeText(i.value) : Promise.reject()).then(function () { toast('Link copied.'); }).catch(function () { document.execCommand('copy'); toast('Link copied.'); }); };
+$('mShare').onclick = function () { var u = $('mPLink').value; if (navigator.share) navigator.share({ title: 'Time Clock', text: 'Open this on your phone to time in and out:', url: u }).catch(function () {}); else $('mCopy').onclick(); };
+$('mQrBtn').onclick = function () {
+  var box = $('qr'); box.classList.toggle('hide'); if (box.classList.contains('hide') || box.firstChild) return;
+  var draw = function () { new window.QRCode(box, { text: $('mPLink').value, width: 240, height: 240, correctLevel: window.QRCode.CorrectLevel.M }); };
+  if (window.QRCode) return draw();
+  var sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = draw; sc.onerror = function () { box.textContent = 'Could not load the QR code. Use Copy link instead.'; }; document.head.appendChild(sc);
+};
+$('mLoad').onclick = function () {
+  var d = $('mDay').value; if (!d) return;
+  $('mRowsMsg').textContent = 'Loading…'; $('mRows').innerHTML = '';
+  Promise.all([api({ action: 'tcpunches', from: d, to: d }), api({ action: 'tcphotos', date: d, name: mgr.name, pin: mgr.pin }).catch(function () { return {}; })]).then(function (r) {
+    var ps = (r[0].punches || []).slice().sort(function (a, b) { return a.t - b.t; }), ph = (r[1] && r[1].photos) || {};
+    $('mRows').innerHTML = ps.map(function (p) {
+      var bad = /Wrong PIN|Outside|Not on/.test(p.status);
+      return '<tr><td>' + (ph[p.id] ? '<img src="' + esc(ph[p.id]) + '" alt="">' : '') + '</td><td>' + esc(p.name) + '</td><td>' + (p.type === 'in' ? 'In' : 'Out') + '</td><td>' + esc(p.t ? tStr(p.t) : '') +
+        '</td><td>' + esc(p.where) + (p.loc ? '<br><span class="mute">' + esc(p.loc) + '</span>' : '') + '</td><td>' + (p.status === 'OK' ? '<span class="pill ok">OK</span>' : '<span class="pill ' + (bad ? 'bad' : 'warn') + '">' + esc(p.status) + '</span>') + '</td></tr>';
+    }).join('');
+    $('mRowsMsg').textContent = ps.length ? ps.length + ' punches.' : 'No punches on this day.';
+  }).catch(function () { $('mRowsMsg').textContent = 'Could not reach the Google Sheet.'; });
+};
+
+/* ---------- start ---------- */
+document.addEventListener('click', function (e) {
+  var g = e.target.closest('[data-go]'); if (!g) return;
+  var to = g.getAttribute('data-go');
+  if (to === 'mgr') mgrOpen();
+  else if (to === 'choose') { st.mode = ''; LS.set('mode', ''); st.me = null; LS.set('me', null); start(); }
+  else if (to === 'kiosk') { mgrBack = 'kiosk'; toast('Log in as the owner to set up the store tablet.'); mgrOpen(); }
+  else if (to === 'phone') { st.mode = 'phone'; LS.set('mode', 'phone'); start(); }
+});
+$('fLink').onsubmit = function (e) {
+  e.preventDefault(); var u = $('iLink').value.trim();
+  if (!SHEET_RE.test(u)) { $('eLink').textContent = 'The link should start with https://script.google.com/macros/s/ and end with /exec.'; return; }
+  st.sheet = u; LS.set('sheet', u); start(); loadRoster();
+};
+function render() {
+  if ($('sKiosk').classList.contains('on')) renderKiosk();
+  if ($('sWho').classList.contains('on')) renderWho();
+  if ($('sPhone').classList.contains('on')) renderPhone();
+}
+function start() {
+  if (!st.mode) return show('sMode');
+  if (!st.sheet) return show('sLink');
+  if (st.mode === 'kiosk') { kioskHome(); try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (e) {} }
+  else phoneHome();
+}
+function tick() {
+  var n = new Date(now()), t = fSec.format(n).replace(/:\d\d(?=\s)/, function (m) { return '<small style="font-size:.45em;opacity:.6">' + m + '</small>'; });
+  $('kClock').innerHTML = t; $('hClock').textContent = fTime.format(n); $('kDate').textContent = fDate.format(n); $('hDate').textContent = fDate.format(n);
+}
+setInterval(tick, 1000); tick();
+setInterval(function () { loadRoster(); if (st.mode === 'kiosk' && $('sKiosk').classList.contains('on')) renderKiosk(); }, 5 * 60000);
+start(); loadRoster(); push();
+try { if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js'); } catch (e) {}
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+})();
+</script>
+</body>
+</html>
